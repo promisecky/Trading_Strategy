@@ -107,6 +107,8 @@ def run_sh50_strategy(rows: list[dict]) -> dict:
         vr = row.get("volume_ratio") or 0
         chg = row.get("change_pct") or 0
         sd = row.get("shares_delta_yi")
+        # 早期/首日份额增量可能为 NULL: 门控视为中性, 文案安全格式化
+        sd_txt = f"{sd:.1f}" if sd is not None else "缺"
 
         if d < TRADE_START:
             continue
@@ -132,7 +134,7 @@ def run_sh50_strategy(rows: list[dict]) -> dict:
                 and money_ok
             ):
                 action = "BUY"
-                reason = f"恐慌抄底: 跌{chg:.1f}%+pp{pp:.0f}+份额{sd:.1f}亿"
+                reason = f"恐慌抄底: 跌{chg:.1f}%+pp{pp:.0f}+份额{sd_txt}亿"
 
             # P2: 低位吸筹 (下跌末期 或 国家队大额申购豁免)
             elif (
@@ -181,9 +183,9 @@ def run_sh50_strategy(rows: list[dict]) -> dict:
                 if strong_bounce or two_day_up:
                     action = "BUY"
                     reason = (
-                        f"右侧反弹: 涨{chg:.1f}%+vr{vr:.1f}+份额{sd:.1f}亿"
+                        f"右侧反弹: 涨{chg:.1f}%+vr{vr:.1f}+份额{sd_txt}亿"
                         if strong_bounce
-                        else f"右侧连涨: 2天+放量+份额{sd:.1f}亿"
+                        else f"右侧连涨: 2天+放量+份额{sd_txt}亿"
                     )
                     waiting_reversal = False
                     wait_low = None

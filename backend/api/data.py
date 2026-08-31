@@ -19,6 +19,7 @@ from base.config import (
 from base.scheduler.job_manager import job_manager, run_job
 from base.scheduler.job_registry import JOB_DEFS, JOB_FNS
 from base.scheduler.scheduled_defs import SCHEDULED_DEFS
+from base.scheduler.shares_jobs import job_import_shares
 from base.scheduler.tasks import scheduler
 from base.store.calendar_repo import get_calendar_count, get_last_sync, get_range, get_trade_days
 from base.store.daily_repo import get_distinct_dates, get_stats
@@ -209,6 +210,24 @@ def write_settings(body: SettingsUpdate):
 @router.get("/jobs")
 def list_jobs(limit: int = Query(default=JOB_LIST_LIMIT, ge=1, le=100)):
     return [j.to_dict() for j in job_manager.list(limit)]
+
+
+class SharesImportRequest(BaseModel):
+    data: dict[str, dict[str, float]]  # {date: {code: shares_yi}}
+
+
+@router.post("/shares/import")
+def import_shares(req: SharesImportRequest):
+    """导入外部拉取的份额数据(服务器出口被封锁时, 本机拉取后 POST 进来)。
+
+    仅补库中缺失的行, 不覆盖已有值; delta/share_prob 同回填口径重算。
+    """
+    if not req.data:
+        raise HTTPException(status_code=400, detail="data 为空")
+    if len(req.data) > 5000:
+        raise HTTPException(status_code=400, detail="单次导入日期数不得超过 5000")
+    result = job_import_shares(lambda c, t, m: None, req.data)
+    return result
 
 
 @router.get("/jobs/{job_id}")

@@ -173,6 +173,7 @@ def evidence_pct(label, method, det, state, invert=False):
             "等于当日": det["equal"],
             "窗口最小": det["min"],
             "窗口最大": det["max"],
+            **({"数据日期(T+1发布)": det["asof_date"]} if det.get("asof_date") else {}),
         },
         "window": det["window"],
         "window_stats": {

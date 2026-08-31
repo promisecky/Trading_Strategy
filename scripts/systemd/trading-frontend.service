@@ -1,0 +1,15 @@
+[Unit]
+Description=TradingSystem Frontend (vite dev :5174)
+After=network-online.target trading-backend.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/root/workspace/TradingSystem/frontend
+ExecStart=/usr/bin/npm run dev -- --host 0.0.0.0
+Restart=always
+RestartSec=3
+StandardOutput=append:/root/workspace/TradingSystem/logs/frontend.log
+StandardError=append:/root/workspace/TradingSystem/logs/frontend.log
+
+[Install]
+WantedBy=multi-user.target

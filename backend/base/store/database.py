@@ -114,6 +114,7 @@ def init_db() -> None:
         _migrate_add_ohlc_columns(conn)
         _migrate_add_calendar_slot_columns(conn)
         _migrate_drop_etf_kline(conn)
+        _migrate_add_value_tables(conn)
         conn.commit()
     finally:
         conn.close()
@@ -147,3 +148,61 @@ def _migrate_add_calendar_slot_columns(conn: sqlite3.Connection) -> None:
 
 def _migrate_drop_etf_kline(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS etf_kline")
+
+
+def _migrate_add_value_tables(conn: sqlite3.Connection) -> None:
+    """价值回归策略独立表(与 ETF 表隔离): 个股信息/分红/ROE/PE/K线/季度池。"""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS value_stock_info (
+            code            TEXT PRIMARY KEY,
+            name            TEXT,
+            industry        TEXT,
+            total_shares_yi REAL,
+            updated_at      TEXT DEFAULT (datetime('now','localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS value_dividend (
+            code          TEXT NOT NULL,
+            fiscal_year   INTEGER NOT NULL,
+            dps           REAL,
+            announce_date TEXT,
+            ex_date       TEXT,
+            PRIMARY KEY (code, fiscal_year)
+        );
+        CREATE TABLE IF NOT EXISTS value_roe (
+            code          TEXT NOT NULL,
+            fiscal_year   INTEGER NOT NULL,
+            roe           REAL,
+            disclose_date TEXT,
+            PRIMARY KEY (code, fiscal_year)
+        );
+        CREATE TABLE IF NOT EXISTS value_pe (
+            code   TEXT NOT NULL,
+            date   TEXT NOT NULL,
+            pe_ttm REAL,
+            PRIMARY KEY (code, date)
+        );
+        CREATE TABLE IF NOT EXISTS value_kline (
+            code  TEXT NOT NULL,
+            date  TEXT NOT NULL,
+            open  REAL,
+            close REAL,
+            high  REAL,
+            low   REAL,
+            PRIMARY KEY (code, date)
+        );
+        CREATE TABLE IF NOT EXISTS value_pool (
+            rebuild_date TEXT NOT NULL,
+            code         TEXT NOT NULL,
+            gates_json   TEXT,
+            PRIMARY KEY (rebuild_date, code)
+        );
+        """
+    )
+    # 存量表补列(新建库上方 CREATE 已含; ALTER 重复执行报重复列则忽略)
+    for col in ("high", "low"):
+        try:
+            conn.execute(f"ALTER TABLE value_kline ADD COLUMN {col} REAL")
+        except sqlite3.OperationalError:
+            pass
+    conn.commit()

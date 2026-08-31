@@ -1,17 +1,30 @@
 from __future__ import annotations
 
+import os
 import time
 from datetime import datetime, timedelta
 
 from base.config import (
-    AKSHARE_TIMEOUT,
     ETFS,
     SHARES_RETRY,
     SHARES_RETRY_BACKOFF_SEC,
+    SSE_TIMEOUT,
 )
 
 _SSE_CACHE: dict[str, dict[str, float]] = {}
 _SZSE_CACHE: dict[str, dict[str, float]] = {}
+
+# SSE 源封锁冷却: 连续失败后短时间内不再发请求(被 WAF reset 时重试无意义)
+_SSE_COOLDOWN_UNTIL = 0.0
+_SSE_SOURCE_BLOCKED = False  # 最近一次 SSE 请求为网络层异常(封锁), 重试无意义
+SSE_COOLDOWN_SEC = 600
+SSE_PROXY_COOLDOWN_SEC = 10  # 走代理时失败多为瞬断/超时, 短冷却即可
+
+
+def _sse_proxies() -> dict[str, str] | None:
+    """SSE 专用代理: 环境变量 SSE_PROXY_URL(本机出口 IP 被上交所封锁时换出口)。"""
+    proxy = os.environ.get("SSE_PROXY_URL", "").strip()
+    return {"http": proxy, "https": proxy} if proxy else None
 
 
 def _date_to_ak(d: str) -> str:
@@ -23,9 +36,12 @@ def _ak_to_date(d: str) -> str:
 
 
 def fetch_shares_sse(date_str: str) -> dict[str, float]:
+    global _SSE_COOLDOWN_UNTIL, _SSE_SOURCE_BLOCKED
     key = date_str
     if key in _SSE_CACHE:
         return _SSE_CACHE[key]
+    if time.time() < _SSE_COOLDOWN_UNTIL:
+        return {}
 
     try:
         import requests
@@ -45,7 +61,9 @@ def fetch_shares_sse(date_str: str) -> dict[str, float]:
             "Referer": "https://www.sse.com.cn/",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
-        r = requests.get(url, params=params, headers=headers, timeout=AKSHARE_TIMEOUT)
+        r = requests.get(
+            url, params=params, headers=headers, timeout=SSE_TIMEOUT, proxies=_sse_proxies()
+        )
         rows = r.json().get("result") or []
         if not rows:
             return {}
@@ -55,11 +73,25 @@ def fetch_shares_sse(date_str: str) -> dict[str, float]:
             vol = row.get("TOT_VOL")
             if code and vol is not None:
                 result[code] = float(vol) / 1e4
+        _SSE_COOLDOWN_UNTIL = 0.0
+        _SSE_SOURCE_BLOCKED = False
         _SSE_CACHE[key] = result
         return result
     except Exception as e:
+        if _sse_proxies():
+            # 代理链路失败多为瞬断/超时, 不标记封锁, 短冷却后继续
+            _SSE_COOLDOWN_UNTIL = time.time() + SSE_PROXY_COOLDOWN_SEC
+            _SSE_SOURCE_BLOCKED = False
+        else:
+            _SSE_COOLDOWN_UNTIL = time.time() + SSE_COOLDOWN_SEC
+            _SSE_SOURCE_BLOCKED = True
         print(f"[FETCH] SSE shares {date_str} failed: {e}")
         return {}
+
+
+def sse_source_blocked() -> bool:
+    """SSE 源最近一次请求是否网络层失败(封锁/断网), 用于跳过无意义重试。"""
+    return _SSE_SOURCE_BLOCKED
 
 
 def fetch_shares_szse(date_str: str) -> dict[str, float]:
@@ -88,19 +120,30 @@ def fetch_shares_szse(date_str: str) -> dict[str, float]:
 
 
 def fetch_shares_for_date(date_str: str) -> dict[str, float]:
-    """拉取某日全部监控 ETF 份额; 整日空结果时重试(限流容错)。"""
+    """拉取某日全部监控 ETF 份额; 沪深分市场独立重试(单市场失败不掩盖另一市场)。
+
+    某市场连续空/失败时按 SHARES_RETRY 退避重试(限流容错), 成功后不再重拉;
+    SSE 被封锁时走冷却快速跳过, 不拖慢整体回填。
+    """
+    sse: dict[str, float] = {}
+    szse: dict[str, float] = {}
     for attempt in range(SHARES_RETRY + 1):
-        sse = fetch_shares_sse(date_str)
-        szse = fetch_shares_szse(date_str)
-        merged = {**sse, **szse}
-        result = {code: merged[code] for code in ETFS if code in merged}
-        if result:
-            return result
+        if not sse:
+            sse = fetch_shares_sse(date_str)
+        if not szse:
+            szse = fetch_shares_szse(date_str)
+        if sse and szse:
+            break
+        # SSE 源被封锁时重试无意义, 直接返回已拿到的部分
+        if not sse and sse_source_blocked():
+            break
         if attempt < SHARES_RETRY:
             wait = SHARES_RETRY_BACKOFF_SEC * (attempt + 1)
-            print(f"[FETCH] shares {date_str} 空结果, {wait}s 后重试 ({attempt + 1}/{SHARES_RETRY})")
+            missing = "SSE" if not sse else "SZSE"
+            print(f"[FETCH] shares {date_str} {missing} 空结果, {wait}s 后重试 ({attempt + 1}/{SHARES_RETRY})")
             time.sleep(wait)
-    return {}
+    merged = {**sse, **szse}
+    return {code: merged[code] for code in ETFS if code in merged}
 
 
 def _recent_weekdays(date_str: str, max_lookback: int) -> list[str]:

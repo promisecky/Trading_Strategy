@@ -17,6 +17,7 @@ from base.scheduler.rebuild import job_rebuild_all
 from base.scheduler.recalc import job_recalc_composite
 from base.scheduler.sentiment_jobs import job_fetch_etf_latest, job_fetch_sentiment
 from base.scheduler.shares_jobs import job_backfill_missing_shares, job_backfill_shares
+from value.fetch import job_value_fetch, job_value_rebuild_pool, job_value_upgrade_kline
 
 JOB_DEFS: dict[str, dict] = {
     "sync_calendar": {
@@ -137,6 +138,33 @@ JOB_DEFS: dict[str, dict] = {
             {"step": "write", "text": "更新 dir_prob / composite_prob / signal_level 三列（幂等，可重复执行）"},
         ],
     },
+    "value_fetch_data": {
+        "label": "价值回归-拉取个股数据",
+        "exclusive": False,
+        "defaults": {},
+        "data_flow": [
+            {"step": "fetch", "text": "候选宇宙预筛(市值≥300亿+PE>0+非地产) → 逐只拉 K线/分红/ROE/PE"},
+            {"step": "write", "text": "value_* 表缓存, 断点续传(已有K线跳过)"},
+        ],
+    },
+    "value_rebuild_pool": {
+        "label": "价值回归-重建股票池",
+        "exclusive": False,
+        "defaults": {},
+        "data_flow": [
+            {"step": "derive", "text": "以最新K线日为 as-of, 七道门 point-in-time 判定"},
+            {"step": "write", "text": "value_pool 落库(季度首日由定时/手动触发)"},
+        ],
+    },
+    "value_upgrade_kline": {
+        "label": "价值回归-升级K线(补高低价)",
+        "exclusive": False,
+        "defaults": {},
+        "data_flow": [
+            {"step": "fetch", "text": "为缺 high/low 的存量个股重拉全量前复权 K 线"},
+            {"step": "write", "text": "value_kline 覆盖写入, 幂等可断点续传"},
+        ],
+    },
     "rebuild_all": {
         "label": "一键重建全部数据",
         "exclusive": True,
@@ -168,4 +196,7 @@ JOB_FNS: dict[str, Callable[..., dict]] = {
     "fetch_etf_latest": job_fetch_etf_latest,
     "recalc_composite": job_recalc_composite,
     "rebuild_all": job_rebuild_all,
+    "value_fetch_data": job_value_fetch,
+    "value_rebuild_pool": job_value_rebuild_pool,
+    "value_upgrade_kline": job_value_upgrade_kline,
 }

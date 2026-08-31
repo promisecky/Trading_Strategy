@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import bisect
+
 from base.analysis.sentiment.core import pct_rank_parts, turnover_value
 from base.config import (
     DEFENSIVE_ETFS,
@@ -57,9 +59,17 @@ def _turnover_detail(turnover_rows, date, window, min_pts):
 
 
 def _margin_detail(margin_rows, date, window, min_pts):
-    return percentile_detail(
-        [r.get("date") for r in margin_rows], [r.get("fin_balance_yi") for r in margin_rows], window, min_pts, date
+    """融资余额 T+1 发布: 取 date 当日或之前最近一个已发布日的分位(asof)。"""
+    dates = [r.get("date") for r in margin_rows]
+    i = bisect.bisect_right(dates, date) - 1
+    if i < 0:
+        return None
+    det = percentile_detail(
+        dates, [r.get("fin_balance_yi") for r in margin_rows], window, min_pts, dates[i]
     )
+    if det is not None:
+        det = {**det, "asof_date": dates[i]}
+    return det
 
 
 def build_day_indicators(
@@ -90,7 +100,8 @@ def build_day_indicators(
     )
     margin_method = (
         f"融资杠杆：融资余额在滚动 {window} 个交易日窗口内计算分位。"
-        "分位 = (低于当日的天数 + 0.5×相等的天数) / 样本数 × 100"
+        "分位 = (低于当日的天数 + 0.5×相等的天数) / 样本数 × 100。"
+        "融资余额 T+1 发布, 取当日或之前最近已发布日(asof)"
     )
     evidences = {
         "price_position": evidence_position(etf_row, states["price_position"]),

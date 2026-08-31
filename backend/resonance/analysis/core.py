@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import bisect
+
 from base.analysis.sentiment.core import percentile_series, turnover_value
 from base.config import (
     COMPOSITE_PROB_GREEN,
@@ -90,6 +92,16 @@ def _pct_state(p, invert: bool = False):
     return GRAY
 
 
+def _asof_percentile(keys: list[str], pct_by_date: dict, date: str):
+    """T+1 发布型指标(融资余额): 取 date 当日或之前最近一个可用分位。
+
+    融资余额 T+1 晚间发布, 最新交易日当天无值; 精确匹配会导致
+    最新日及缺失日该灯恒为灰。asof 语义 = "截至当日已知的最新值"。
+    """
+    i = bisect.bisect_right(keys, date) - 1
+    return pct_by_date[keys[i]].get("percentile") if i >= 0 else None
+
+
 def eval_day(etf_row: dict, turn_p, margin_p, code: str | None = None) -> dict:
     # 防御型资产(中证红利等): 成交额热/融资高 = 避险资金流入 = 绿灯
     invert = code in DEFENSIVE_ETFS if code else False
@@ -155,13 +167,14 @@ def compute_resonance(
     m_pct = percentile_series(
         [r.get("date") for r in margin_rows], [r.get("fin_balance_yi") for r in margin_rows], window, min_pts
     )
+    m_keys = sorted(m_pct)
 
     history = []
     for d in sorted(etf_by_date):
         if d not in t_pct and d not in m_pct:
             continue
         tp = t_pct.get(d, {}).get("percentile")
-        mp = m_pct.get(d, {}).get("percentile")
+        mp = _asof_percentile(m_keys, m_pct, d)
         states = eval_day(etf_by_date[d], tp, mp, code)
         red = sum(1 for s in states.values() if s == RED)
         green = sum(1 for s in states.values() if s == GREEN)
@@ -186,7 +199,7 @@ def compute_resonance(
     last = history[-1]
     d = last["date"]
     tp = t_pct.get(d, {}).get("percentile")
-    mp = m_pct.get(d, {}).get("percentile")
+    mp = _asof_percentile(m_keys, m_pct, d)
     return {
         "code": code,
         "name": name,

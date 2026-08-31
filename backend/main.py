@@ -18,6 +18,7 @@ from base.api.static import mount_frontend
 from base.scheduler.tasks import start_scheduler, stop_scheduler
 from portfolio.api import router as portfolio_router
 from resonance.api import router as resonance_router
+from value.api import router as value_router
 
 
 @asynccontextmanager
@@ -45,6 +46,7 @@ for router in (
     resonance_router,
     data_router,
     portfolio_router,
+    value_router,
 ):
     app.include_router(router)
 

@@ -1,4 +1,4 @@
-import type { ResonanceOverview, ResonanceIndicator, LightState } from '../../api/types'
+import type { ResonanceOverview, ResonanceDayDetail, ResonanceIndicator, LightState } from '../../api/types'
 
 const LIGHT_STYLES: Record<LightState, { dot: string; card: string; text: string }> = {
   red: { dot: 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.7)]', card: 'border-red-500/40', text: 'text-red-400' },
@@ -69,7 +69,7 @@ function LightGroup({ title, items, selectedKey, onSelect }: {
 }
 
 export default function ResonanceLights({ data, selectedKey, onSelect }: {
-  data: ResonanceOverview
+  data: ResonanceOverview | ResonanceDayDetail
   selectedKey: string | null
   onSelect: (key: string) => void
 }) {

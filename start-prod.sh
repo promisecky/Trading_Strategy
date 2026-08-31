@@ -64,6 +64,9 @@ fi
 lsof -ti ":$PORT" | xargs kill -9 2>/dev/null || true
 sleep 1
 
+# SSE 份额代理网关(本机 IP 被上交所封锁时经 SS 节点换出口; 未配置则自动跳过)
+source "$ROOT/scripts/start_sse_proxy.sh"
+
 UVICORN_CMD=(
   "$VENV_DIR/bin/python" -m uvicorn main:app
   --host "${HOST:-0.0.0.0}" --port "$PORT"

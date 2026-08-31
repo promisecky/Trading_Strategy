@@ -13,6 +13,7 @@ export default defineConfig({
   server: {
     port: 5174,
     host: '0.0.0.0',
+    allowedHosts: ['.opensesame.cc', 'localhost', '127.0.0.1'],
     proxy: {
       '/api': {
         target: 'http://localhost:8001',

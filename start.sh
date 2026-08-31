@@ -10,7 +10,7 @@ cd "$ROOT"
 if [[ -t 0 && "${1:-}" != "--foreground" ]]; then
   echo "[start] 检测到交互终端, 自动后台启动 (nohup)"
   echo "[start] 日志: $ROOT/nohup.out"
-  echo "[start] 停止: pkill -f 'uvicorn main:app.*--port 8001'"
+  echo "[start] 停止/重启: ./scripts/restart.sh"
   nohup "$0" --foreground > "$ROOT/nohup.out" 2>&1 &
   echo "[start] 已后台启动, PID: $!"
   exit 0
@@ -58,7 +58,19 @@ lsof -ti ":$BACKEND_PORT" | xargs kill -9 2>/dev/null || true
 lsof -ti ":$FRONTEND_PORT" | xargs kill -9 2>/dev/null || true
 find "$BACKEND_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 find "$BACKEND_DIR" -name "*.pyc" -delete 2>/dev/null || true
-sleep 1
+# 等待端口真正释放(uvicorn --reload 子进程/vite 子进程退出可能超过 1s,
+# 不等待会导致新进程 bind 报 address already in use / Port is already in use)
+for port in "$BACKEND_PORT" "$FRONTEND_PORT"; do
+  for _ in $(seq 1 10); do
+    lsof -ti ":$port" >/dev/null 2>&1 || break
+    sleep 1
+  done
+  if lsof -ti ":$port" >/dev/null 2>&1; then
+    log "端口 $port 仍被占用, 再次强杀"
+    lsof -ti ":$port" | xargs kill -9 2>/dev/null || true
+    sleep 1
+  fi
+done
 
 # --- 1. Python 虚拟环境 + 后端依赖 ---
 if ! "$VENV_DIR/bin/pip" --version >/dev/null 2>&1; then
@@ -87,7 +99,10 @@ if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
   (cd "$FRONTEND_DIR" && npm install --silent)
 fi
 
-# --- 3. 启动前后端，退出时统一清理 ---
+# --- 3. SSE 份额代理网关(本机 IP 被上交所封锁时经 SS 节点换出口; 未配置则自动跳过) ---
+source "$ROOT/scripts/start_sse_proxy.sh"
+
+# --- 4. 启动前后端，退出时统一清理 ---
 PIDS=()
 cleanup() {
   log "停止服务 ..."

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useResonance, useEtfHistory } from '../hooks/useResonance'
+import { useResonance, useResonanceDay, useEtfHistory } from '../hooks/useResonance'
 import { fetchEtfList, fetchResonanceTrades, fetchStrategyVersions, refreshEtf } from '../api/client'
 import ResonanceLights from '../components/resonance/ResonanceLights'
 import ResonanceKline from '../components/resonance/ResonanceKline'
@@ -26,6 +26,9 @@ export default function Resonance() {
   const queryClient = useQueryClient()
 
   const { data, isLoading, error, refetch } = useResonance(code)
+  // 选中某日时红绿灯面板展示该日指标(默认展示最新日 overview)
+  const { data: dayData } = useResonanceDay(code, selected?.date ?? null)
+  const lightsData = dayData && selected && dayData.date === selected.date ? dayData : data
   const { data: etfList } = useQuery({
     queryKey: ['etfList'],
     queryFn: fetchEtfList,
@@ -125,7 +128,8 @@ export default function Resonance() {
   }
 
   const selectLight = (key: string) => {
-    if (data?.date) setSelected({ date: data.date, indicator: key })
+    const base = lightsData?.date ?? data?.date
+    if (base) setSelected({ date: base, indicator: key })
   }
   const selectDate = (date: string) => setSelected({ date, indicator: null })
   const selectCell = (date: string, indicator: string) => setSelected({ date, indicator })
@@ -238,10 +242,10 @@ export default function Resonance() {
       </div>
 
       {/* V1: 红绿灯面板 */}
-      {data ? (
+      {lightsData ? (
         <ResonanceLights
-          data={data}
-          selectedKey={selected?.date === data.date ? selected?.indicator ?? null : null}
+          data={lightsData}
+          selectedKey={selected && selected.date === lightsData.date ? selected.indicator ?? null : null}
           onSelect={selectLight}
         />
       ) : null}

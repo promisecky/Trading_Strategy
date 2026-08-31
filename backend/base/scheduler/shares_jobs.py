@@ -16,8 +16,10 @@ from base.config import (
     DEFAULT_CHUNK_DAYS,
     DEFAULT_SHARES_BACKFILL_DAYS,
     SHARE_WINDOW,
+    SHARES_DAY_RETRY,
     SHARES_FAIL_PAUSE_AFTER,
     SHARES_FAIL_PAUSE_SEC,
+    SHARES_RETRY_BACKOFF_SEC,
 )
 from base.fetch.shares import fetch_shares_for_date
 from base.scheduler.calendar_slots import job_refresh_calendar_slots
@@ -82,6 +84,22 @@ def _write_shares_date(
     return n
 
 
+def _write_shares_date_with_retry(
+    date: str, prev_shares: dict, codes: list[str], prev_window: dict[str, list[float]] | None
+) -> int:
+    """单日拉取失败(代理瞬断/超时)现场重试, 避免留下缺口。"""
+    wrote = 0
+    for attempt in range(SHARES_DAY_RETRY + 1):
+        wrote = _write_shares_date(date, prev_shares, codes, prev_window)
+        if wrote:
+            break
+        if attempt < SHARES_DAY_RETRY:
+            wait = SHARES_RETRY_BACKOFF_SEC * (attempt + 1)
+            print(f"[BACKFILL] {date} 拉取失败, {wait}s 后重试 ({attempt + 1}/{SHARES_DAY_RETRY})")
+            time.sleep(wait)
+    return wrote
+
+
 def job_backfill_shares(
     progress: ProgressFn,
     days: int = DEFAULT_SHARES_BACKFILL_DAYS,
@@ -113,7 +131,7 @@ def job_backfill_shares(
             continue
         targets = [r["code"] for r in get_by_date(date)] if force else missing
         progress(chunk_idx, total_chunks, f"{date} 补 {len(targets)} 只 (第 {chunk_idx}/{total_chunks} 批)")
-        wrote = _write_shares_date(date, prev_shares, targets, prev_window)
+        wrote = _write_shares_date_with_retry(date, prev_shares, targets, prev_window)
         if wrote == 0:
             # 整日拉取失败 → 可能被限流, 连续失败则暂停给远端喘息
             fail_streak += 1
@@ -149,7 +167,7 @@ def job_backfill_missing_shares(progress: ProgressFn) -> dict:
         _load_prev_shares(date, prev_shares, prev_window)
         targets = _missing_share_etfs(date)
         progress(i, len(dates), f"{date} 补 {len(targets)} 只: {','.join(targets[:3])}")
-        wrote = _write_shares_date(date, prev_shares, targets, prev_window)
+        wrote = _write_shares_date_with_retry(date, prev_shares, targets, prev_window)
         if wrote == 0:
             fail_streak += 1
             if fail_streak >= SHARES_FAIL_PAUSE_AFTER:
@@ -162,3 +180,52 @@ def job_backfill_missing_shares(progress: ProgressFn) -> dict:
         time.sleep(BACKFILL_SLEEP_SEC)
     progress(len(dates), len(dates), f"完成 {written} 行 ({fetched_dates} 天)")
     return {"dates": len(dates), "written": written, "fetched_dates": fetched_dates}
+
+
+def job_import_shares(progress: ProgressFn, payload: dict) -> dict:
+    """导入外部拉取的份额数据(本机出口被封锁时, 用可直连交易所的网络拉取后传入)。
+
+    payload 格式: {date: {code: shares_yi}}; 仅补库中缺失的行, 不覆盖已有值。
+    delta/share_prob 与回填同口径重算(基于库内前一日份额 + 滑动窗口)。
+    """
+    dates = sorted(d for d in payload if payload[d])
+    if not dates:
+        progress(1, 1, "导入数据为空")
+        return {"dates": 0, "written": 0}
+    prev_shares: dict = {}
+    prev_window: dict[str, list[float]] = {}
+    written = 0
+    for i, date in enumerate(dates, 1):
+        _load_prev_shares(date, prev_shares, prev_window)
+        rows = {r["code"]: r for r in get_by_date(date)}
+        n = 0
+        for code, shares_yi in payload[date].items():
+            row = rows.get(code)
+            if row is None:
+                continue  # 该日库中无此 ETF 的 K 线行
+            if row.get("shares_yi") is not None and row.get("shares_delta_yi") is not None:
+                continue  # 已完整, 不覆盖
+            if shares_yi is None:
+                continue
+            delta_yi = None
+            delta_pct = None
+            prev = prev_shares.get(code)
+            if prev is not None and prev > 0:
+                delta_yi = round(shares_yi - prev, 4)
+                delta_pct = round(delta_yi / prev * 100, 3)
+            hist = prev_window.get(code, [])
+            sp = calc_share_probability_dual(delta_pct, shares_yi, hist, SHARE_WINDOW)
+            if sp is None and row.get("share_prob") is not None:
+                sp = row["share_prob"]  # 无 delta(首日无前值)时保留已有概率, 避免被误判为缺失
+            update_share_data(date, code, float(shares_yi), delta_yi, delta_pct, sp)
+            prev_shares[code] = float(shares_yi)
+            hist = prev_window.setdefault(code, [])
+            hist.append(float(shares_yi))
+            if len(hist) > SHARE_WINDOW:
+                hist.pop(0)
+            n += 1
+        written += n
+        progress(i, len(dates), f"{date} 导入 {n} 行")
+    progress(len(dates), len(dates), f"完成导入 {written} 行 ({len(dates)} 天)")
+    job_refresh_calendar_slots(progress)  # 刷新日历槽位台账(份额覆盖)
+    return {"dates": len(dates), "written": written}

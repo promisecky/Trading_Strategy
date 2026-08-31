@@ -8,6 +8,10 @@ const TOP_NAV = [
   { to: '/portfolio', label: 'ETF组合回测' },
 ]
 
+const STOCK_NAV = [
+  { to: '/value', label: '价值回归·个股' },
+]
+
 const AUX_NAV = [
   { to: '/sentiment', label: '市场宏观指标' },
   { to: '/monitor', label: 'ETF流向分析' },
@@ -34,6 +38,12 @@ function SidebarNav() {
   return (
     <nav className="flex-1 px-3 py-4 space-y-1">
       {TOP_NAV.map(item => (
+        <NavLink key={item.to} to={item.to} className={linkClass}>
+          {item.label}
+        </NavLink>
+      ))}
+      <div className="pt-3 mt-3 border-t border-gray-800 text-[10px] px-3 text-gray-600">个股策略</div>
+      {STOCK_NAV.map(item => (
         <NavLink key={item.to} to={item.to} className={linkClass}>
           {item.label}
         </NavLink>

@@ -1,4 +1,4 @@
-import type { SignalResponse, EtfHistoryResponse, EtfInfo, RealtimeStatus, StatsResponse, SentimentOverview, SentimentRefreshResult, EtfRefreshResult, CalendarDays, CalendarRefreshResult, ResonanceOverview, ResonanceDayDetail, TradesResponse, DataStatus, DataSettings, JobState, StartJobRequest, StartJobResponse, PortfolioBacktestResponse, RealtimeTurnoverResponse, ScheduledTaskInfo } from './types'
+import type { SignalResponse, EtfHistoryResponse, EtfInfo, RealtimeStatus, StatsResponse, SentimentOverview, SentimentRefreshResult, EtfRefreshResult, CalendarDays, CalendarRefreshResult, ResonanceOverview, ResonanceDayDetail, TradesResponse, DataStatus, DataSettings, JobState, StartJobRequest, StartJobResponse, PortfolioBacktestResponse, RealtimeTurnoverResponse, ScheduledTaskInfo, ValueOverview, ValueBacktest, ValuePoolResponse, ValueKlineResponse, ValueIndicators, ValueScheduledTask, ValueStockTrades } from './types'
 
 const BASE = `${__APP_BASE__}/api`
 
@@ -148,4 +148,34 @@ export function updateDataSettings(body: DataSettings): Promise<DataSettings> {
 
 export function startDataJob(req: StartJobRequest): Promise<StartJobResponse> {
   return post('/data/jobs', req)
+}
+
+// ---- 价值回归(个股策略, 与 ETF 体系隔离) ----
+export function fetchValueOverview(): Promise<ValueOverview> {
+  return get('/value/overview', 90_000)
+}
+
+export function fetchValueBacktest(start = '2018-01-01', end?: string): Promise<ValueBacktest> {
+  const q = end ? `&end=${end}` : ''
+  return get(`/value/backtest?start=${start}${q}`, 90_000)
+}
+
+export function fetchValuePool(): Promise<ValuePoolResponse> {
+  return get('/value/pool', 90_000)
+}
+
+export function fetchValueKline(code: string): Promise<ValueKlineResponse> {
+  return get(`/value/kline?code=${code}`, 60_000)
+}
+
+export function fetchValueIndicators(code: string): Promise<ValueIndicators> {
+  return get(`/value/indicators?code=${code}`, 60_000)
+}
+
+export function fetchValueScheduled(): Promise<ValueScheduledTask[]> {
+  return get('/value/scheduled', 30_000)
+}
+
+export function fetchValueStockTrades(code: string): Promise<ValueStockTrades> {
+  return get(`/value/stock_trades?code=${code}`, 90_000)
 }

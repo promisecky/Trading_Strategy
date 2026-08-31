@@ -59,6 +59,7 @@ TRADING_MINUTES = 240
 REALTIME_INTERVAL_SEC = 30
 HTTP_TIMEOUT = 15
 AKSHARE_TIMEOUT = 30
+SSE_TIMEOUT = 60  # 上交所份额接口超时(走代理时链路较长, 需更大容忍)
 MAX_RETRY = 2
 
 # 盘中两市成交额轮询(收盘前分析用)
@@ -84,6 +85,7 @@ CACHE_BUFFER_DAYS = 5  # 前端缓存安全缓冲: 最近 N 个交易日数据�
 CACHE_END_SENTINEL = "0000-01-01"  # 无可缓存安全历史时的哨兵截止日(增量起点=全量)
 SHARES_RETRY = 2  # 份额单日拉取失败重试次数
 SHARES_RETRY_BACKOFF_SEC = 5  # 份额重试递进间隔基数(秒, 每次×递增)
+SHARES_DAY_RETRY = 2  # 回填时单日拉取失败的现场重试次数(代理瞬断容错)
 SHARE_WINDOW = 10  # 份额概率双基准窗口: 当日 vs 前N日均值取强(持续吸筹放大)
 SHARES_FAIL_PAUSE_AFTER = 3  # 连续失败达到此数后暂停
 SHARES_FAIL_PAUSE_SEC = 60  # 连续失败暂停时长(秒, 给远端喘息)

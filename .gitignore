@@ -19,6 +19,9 @@ dist/
 # Logs
 *.log
 
+# 本地工具二进制(SSE 代理 sslocal 等)
+tools/
+
 # Qoder session
 .qoder/
 

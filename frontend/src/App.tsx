@@ -9,6 +9,7 @@ import KlineCompare from './pages/KlineCompare'
 import PortfolioBacktest from './pages/PortfolioBacktest'
 import DataManage from './pages/DataManage'
 import ScheduledTasks from './pages/ScheduledTasks'
+import Value from './pages/Value'
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="/resonance" element={<Resonance />} />
           <Route path="/compare" element={<KlineCompare />} />
           <Route path="/portfolio" element={<PortfolioBacktest />} />
+          <Route path="/value" element={<Value />} />
           <Route path="/sentiment" element={<Sentiment />} />
           <Route path="/calendar" element={<TradeCalendar />} />
           <Route path="/data" element={<DataManage />} />

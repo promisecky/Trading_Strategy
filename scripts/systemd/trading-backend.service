@@ -1,0 +1,15 @@
+[Unit]
+Description=TradingSystem Backend (uvicorn :8001)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/root/workspace/TradingSystem/backend
+ExecStart=/root/workspace/TradingSystem/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=3
+StandardOutput=append:/root/workspace/TradingSystem/logs/backend.log
+StandardError=append:/root/workspace/TradingSystem/logs/backend.log
+
+[Install]
+WantedBy=multi-user.target

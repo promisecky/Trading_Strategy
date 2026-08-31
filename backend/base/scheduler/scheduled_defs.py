@@ -102,3 +102,27 @@ SCHEDULED_DEFS: dict[str, dict] = {
         ],
     },
 }
+
+# 价值回归(个股策略)独立定时任务: 与 ETF 体系隔离, 仅在价值回归页展示,
+# 不并入上方 SCHEDULED_DEFS(避免出现在 ETF 定时任务页)。调度注册同样在 tasks.py。
+VALUE_SCHEDULED_DEFS: dict[str, dict] = {
+    "value_daily_update": {
+        "label": "价值回归·个股数据日更",
+        "schedule": "工作日 16:30 · 收盘后",
+        "purpose": "每日增量拉取 618 只候选个股的 K 线/分红/ROE/PE, 仅重拉落后于最新交易日的个股(秒~分钟级)",
+        "data_flow": [
+            {"step": "fetch", "text": "腾讯前复权日K + 东财分红/ROE/PE-TTM(断点续传, 已最新者跳过)"},
+            {"step": "write", "text": "value_* 表增量写入 → 失效回测缓存并后台重算"},
+        ],
+    },
+    "value_quarterly_rebuild": {
+        "label": "价值回归·季度股票池重建",
+        "schedule": "工作日 17:00 · 仅季度首个交易日执行",
+        "purpose": "1/4/7/10 月第一个交易日以 as-of 数据重跑七道门重建股票池; 其余交易日自动跳过",
+        "data_flow": [
+            {"step": "read", "text": "交易日历判定当日是否季度月首个交易日"},
+            {"step": "derive", "text": "七道门 point-in-time 判定(分红/PE/股息/市值/行业/ROE)"},
+            {"step": "write", "text": "value_pool 落库 → 失效缓存并后台重算"},
+        ],
+    },
+}
