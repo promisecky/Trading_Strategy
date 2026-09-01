@@ -255,7 +255,11 @@ export default function Value() {
 
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
               <div className="text-xs text-gray-500 mb-2">
-                净值曲线({btStart} → {range.end ?? '最新'}) + 买卖点(▲绿买 ▼红卖, 点击三角看明细) · 闲钱年化 {backtest.data.idle_yield_pct}% · 次日开盘成交 · 无前视
+                净值曲线({btStart} → {range.end ?? '最新'}) + 买卖点(▲绿买 ▼红卖, 点击三角看明细) ·{' '}
+                {backtest.data.idle_fund?.mode === 'fund'
+                  ? `闲钱 = ${backtest.data.idle_fund.name}(${backtest.data.idle_fund.code}) 实际日线收益, 缺失日按年化 ${backtest.data.idle_yield_pct}% 兜底`
+                  : `闲钱年化 ${backtest.data.idle_yield_pct}%`}
+                {' '}· 次日开盘成交 · 无前视
               </div>
               <ValueEquityChart history={backtest.data.history} trades={backtest.data.trades} />
             </div>

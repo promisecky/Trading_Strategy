@@ -115,6 +115,15 @@ VALUE_SCHEDULED_DEFS: dict[str, dict] = {
             {"step": "write", "text": "value_kline/value_pe 增量 upsert → 失效缓存 + 重建池预览"},
         ],
     },
+    "value_freshness_guard": {
+        "label": "价值回归·数据新鲜度巡检",
+        "schedule": "工作日 16-23 点每小时 · 共享交易日历",
+        "purpose": "每小时核对个股数据与交易日历最近交易日: 落后即自动追更(16:30 日更失败/网络抽风/停机错过等场景的兜底), 新鲜时零开销跳过",
+        "data_flow": [
+            {"step": "read", "text": "trade_calendar(与 ETF 体系共用) 取最近交易日 vs value_kline 最新日"},
+            {"step": "derive", "text": "落后判定 → 触发轻量日更+池预览重建; 否则直接返回"},
+        ],
+    },
     "value_quarterly_rebuild": {
         "label": "价值回归·季度股票池重建",
         "schedule": "工作日 17:00 · 仅季度首个交易日执行",

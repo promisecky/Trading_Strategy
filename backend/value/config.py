@@ -44,3 +44,7 @@ Z_WINDOW = 250  # z = (bias − 250日均值) ÷ 250日标准差
 KLINE_START_YEAR = 2017  # K线拉取起始年(含 120+250 暖机, 覆盖 2018 回测)
 
 TRADING_DAYS_PER_YEAR = 252
+
+# ---- 闲钱货币化 ----
+IDLE_FUND_CODE = "511880"  # 银华日利(场内货币ETF): 闲钱按其前复权日线收益计息
+IDLE_FUND_NAME = "银华日利"

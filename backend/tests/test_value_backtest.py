@@ -156,6 +156,18 @@ def test_metrics_round_trip():
     assert m["max_drawdown_pct"] <= 0.0
 
 
+def test_idle_cash_follows_fund_series():
+    """闲钱按货币基金实际日线收益计息: 无交易时净值=基金首尾比(缺失首日不计)。"""
+    closes = [1.0] * N  # bias=1.0 无信号
+    fund = {d: 100 * (1.001 ** (i + 1)) for i, d in enumerate(DATES)}
+    res = run_backtest(
+        DATES, {"A": kline_from(closes)}, {"A": snap("A")}, pe_const(["A"]),
+        idle_yield_pct=0.0, idle_close=fund,
+    )
+    expect = fund[DATES[-1]] / fund[DATES[0]]
+    assert abs(res["history"][-1]["equity"] - expect) < 1e-6
+
+
 def test_suspension_gap_no_crash_and_carry_forward_valuation():
     # 对抗性: 持仓期间停牌 3 天(真实数据必然存在), 不得 KeyError,
     # 停牌日按最后收盘估值, 且停牌日不产生/执行任何交易

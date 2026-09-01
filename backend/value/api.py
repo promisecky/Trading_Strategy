@@ -21,7 +21,7 @@ from base.scheduler.scheduled_defs import VALUE_SCHEDULED_DEFS
 from base.scheduler.tasks import scheduler
 from value import cache, store
 from value.backtest import run_backtest
-from value.config import DY_LOOKBACK_DAYS, IDLE_YIELD_PCT, MA_WINDOW, MAX_SLOTS
+from value.config import DY_LOOKBACK_DAYS, IDLE_FUND_CODE, IDLE_FUND_NAME, IDLE_YIELD_PCT, MA_WINDOW, MAX_SLOTS
 from value.engine import bias_series, buy_signals, cooldown_active, sell_signals, z_series
 
 router = APIRouter(prefix="/api/value", tags=["value"])
@@ -88,7 +88,10 @@ def _compute_state(start: str, idle_yield: float) -> dict:
     dates = [d for d in inp["dates"] if d >= start]
     if len(dates) < 2:
         return {"ready": False, "metrics": None, "history": [], "trade_log": [], "final": None, "signals": None}
-    res = run_backtest(dates, inp["kline"], inp["snapshots"], inp["pe"], idle_yield)
+    # 闲钱货币基金实际日线收益(缺失时回退固定年化)
+    fund = inp["kline"].get(IDLE_FUND_CODE, {})
+    idle_close = {d: row["close"] for d, row in fund.items() if row.get("close")} or None
+    res = run_backtest(dates, inp["kline"], inp["snapshots"], inp["pe"], idle_yield, idle_close=idle_close)
     last, prev = dates[-1], dates[-2]
     idx = len(dates) - 1
     final = res["final"]
@@ -135,6 +138,11 @@ def _compute_state(start: str, idle_yield: float) -> dict:
         "pool_rebuilds": res["pool_rebuilds"],
         "final": final,
         "signals": {"sells": sells, "buys": buys},
+        "idle_fund": {
+            "code": IDLE_FUND_CODE,
+            "name": IDLE_FUND_NAME,
+            "mode": "fund" if idle_close else "fixed",
+        },
     }
 
 
@@ -292,6 +300,7 @@ def value_backtest(
         "start": start,
         "end": end,
         "idle_yield_pct": idle_yield,
+        "idle_fund": st.get("idle_fund"),
         "metrics": st["metrics"],
         "history": history,
         "trades": trades,

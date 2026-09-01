@@ -71,9 +71,11 @@ def run_backtest(
     pe_series: dict[str, dict[str, float]] | None = None,
     idle_yield_pct: float = IDLE_YIELD_PCT,
     slot_divisor: int = MAX_SLOTS,
+    idle_close: dict[str, float] | None = None,
 ) -> dict:
     """逐日推进回测。kline: {code: {date: {"open","close"}}}; snapshots 含分红/ROE/行业/总股本。
-    slot_divisor: 单票金额除数(组合=5 等权; 个股独立视角=1 全仓)。"""
+    slot_divisor: 单票金额除数(组合=5 等权; 个股独立视角=1 全仓)。
+    idle_close: 闲钱货币基金日线收盘{date: close}, 提供时闲钱按其实日收益计息, 缺失日回退固定年化。"""
     pe_series = pe_series or {}
     # 指标序列按 dates 对齐: 停牌日用前收盘填充(价格不变, 指标连续), 上市前为 None(暖机期)
     bias_by_code: dict[str, dict[str, float]] = {}
@@ -162,8 +164,15 @@ def run_backtest(
                     }
                 )
 
-        # ---- 闲置现金货币化(日复利) ----
-        if daily_factor != 1.0:
+        # ---- 闲置现金货币化: 货币基金实际日收益优先, 缺失日回退固定年化 ----
+        grew = False
+        if idle_close:
+            cur_c = idle_close.get(d)
+            prev_c = idle_close.get(dates[idx - 1]) if idx > 0 else None
+            if cur_c and prev_c and prev_c > 0:
+                cash *= cur_c / prev_c
+                grew = True
+        if not grew and daily_factor != 1.0:
             cash *= daily_factor
 
         # ---- 收盘估值 ----

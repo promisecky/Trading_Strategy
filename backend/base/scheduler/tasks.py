@@ -144,7 +144,11 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     # ---- 价值回归(个股策略)定时任务: 与 ETF 链独立, 仅写入 value_* 表 ----
-    from value.fetch import task_value_daily_update, task_value_quarterly_rebuild
+    from value.fetch import (
+        task_value_daily_update,
+        task_value_freshness_guard,
+        task_value_quarterly_rebuild,
+    )
 
     scheduler.add_job(
         _to_thread(trading_day_guard(task_value_daily_update)),
@@ -156,6 +160,12 @@ def start_scheduler() -> None:
         _to_thread(trading_day_guard(task_value_quarterly_rebuild)),
         CronTrigger(hour=17, minute=0, day_of_week="mon-fri"),
         id="value_quarterly_rebuild",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _to_thread(trading_day_guard(task_value_freshness_guard)),
+        CronTrigger(hour="16-23", minute=0, day_of_week="mon-fri"),
+        id="value_freshness_guard",
         replace_existing=True,
     )
     scheduler.start()

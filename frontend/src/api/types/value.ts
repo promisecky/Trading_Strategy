@@ -96,10 +96,17 @@ export interface ValueHistoryPoint {
   cash: number
 }
 
+export interface ValueIdleFund {
+  code: string
+  name: string
+  mode: 'fund' | 'fixed'
+}
+
 export interface ValueBacktest {
   start: string
   end?: string | null
   idle_yield_pct: number
+  idle_fund?: ValueIdleFund | null
   metrics: ValueMetrics
   history: ValueHistoryPoint[]
   trades: ValueTrade[]

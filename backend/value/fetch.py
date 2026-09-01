@@ -22,11 +22,16 @@ import urllib.request
 from datetime import datetime, timedelta
 
 from value import cache, store
-from value.config import KLINE_START_YEAR, MCAP_MIN_YI, POOL_MONTHS, REAL_ESTATE_KEYWORDS
+from value.config import IDLE_FUND_CODE, KLINE_START_YEAR, MCAP_MIN_YI, POOL_MONTHS, REAL_ESTATE_KEYWORDS
 from value.engine import build_pool
 
 FETCH_SLEEP_SEC = 0.4
 _EM_UT = "fa5fd1943c7b386f172d6893dbfba10b"
+
+
+def _symbol(code: str) -> str:
+    """腾讯行情代码前缀: 沪市 6/9/5(ETF) → sh, 其余(0/3/1) → sz。"""
+    return ("sh" if code.startswith(("6", "9", "5")) else "sz") + code
 
 
 def _try(fn, *args, **kwargs):
@@ -214,7 +219,7 @@ def _fetch_pe(code: str) -> list[tuple[str, float]]:
 
 def _fetch_kline(code: str) -> list[tuple[str, float, float, float, float]]:
     """前复权日K(腾讯 HTTPS 源, 按 850 自然日分块规避单次~640根上限), 返回 日/开/收/高/低。"""
-    symbol = ("sh" if code.startswith(("6", "9")) else "sz") + code
+    symbol = _symbol(code)
     start = datetime(KLINE_START_YEAR, 1, 1)
     end = datetime.now()
     out: list[tuple[str, float, float, float, float]] = []
@@ -301,6 +306,7 @@ def job_value_fetch(progress) -> dict:
         done += 1
         progress(i + 1, len(todo), f"{code} K线{n['kline']} 分红{n['dividends']} ROE{n['roes']} PE{n['pe']}")
         time.sleep(FETCH_SLEEP_SEC)
+    _update_idle_fund()
     cache.invalidate_all()  # 数据已变: 失效回测/池缓存并后台重算, 前端下个请求即命中新数据
     return {"universe": len(info_codes), "fetched": done, "failed": failed, "skipped": len(info_codes) - len(todo)}
 
@@ -388,7 +394,7 @@ def job_value_daily_fetch(progress) -> dict:
                     store.replace_kline(code, kl)
                     n_kl = len(kl)
             else:
-                symbol = ("sh" if code.startswith(("6", "9")) else "sz") + code
+                symbol = _symbol(code)
                 d = _tencent_kline(symbol, since, today)
                 if d is not None:
                     node = d.get("data", {}).get(symbol, {})
@@ -413,9 +419,51 @@ def job_value_daily_fetch(progress) -> dict:
             failed += 1
             print(f"[value-daily] {code} 更新异常: {type(e).__name__} {e}")
         time.sleep(FETCH_SLEEP_SEC)
+    _update_idle_fund()
     cache.invalidate_all()
     job_value_rebuild_pool(lambda c, t, m: None)  # 池预览随数据同步刷新
     return {"todo": len(todo), "updated": done, "failed": failed}
+
+
+def task_value_freshness_guard() -> dict:
+    """小时级巡检(共享 ETF 交易日历): 数据落后于日历最近交易日即追更,
+    新鲜时零开销直接返回 — 彻底兼容 调度错过/停机/网络抽风 等场景。"""
+    from base.store.calendar_repo import get_trade_days
+
+    latest = store.latest_kline_dates()
+    cur = max(latest.values()) if latest else ""
+    days = get_trade_days(end=datetime.now().strftime("%Y-%m-%d"))
+    if days and cur < days[-1]:
+        print(f"[value-guard] stale ({cur} < {days[-1]}), catching up...")
+        res = task_value_daily_update()
+        return {"fresh": False, **res}
+    return {"fresh": True, "latest": cur}
+
+
+def _update_idle_fund() -> int:
+    """闲钱货币基金(511880)K线同步: 无历史全量, 有历史增量。"""
+    code = IDLE_FUND_CODE
+    since = store.latest_kline_dates().get(code, "")
+    today = datetime.now().strftime("%Y-%m-%d")
+    if not since:
+        rows = _fetch_kline(code)
+        if rows:
+            store.replace_kline(code, rows)
+        return len(rows)
+    d = _tencent_kline(_symbol(code), since, today)
+    if d is None:
+        return 0
+    node = d.get("data", {}).get(_symbol(code), {})
+    new = []
+    for r in node.get("qfqday") or node.get("day") or []:
+        if len(r) >= 5 and r[0] and r[0] > since:
+            try:
+                new.append((r[0], float(r[1]), float(r[2]), float(r[3]), float(r[4])))
+            except (TypeError, ValueError):
+                continue
+    if new:
+        store.upsert_kline(code, new)
+    return len(new)
 
 
 def task_value_quarterly_rebuild() -> dict:

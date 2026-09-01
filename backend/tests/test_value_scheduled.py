@@ -30,6 +30,32 @@ def test_quarterly_rebuild_skips_non_first_trading_day(monkeypatch):
     assert out["skipped"] and "首个交易日" in out["reason"]
 
 
+# ---------------------------------------------------------------- 新鲜度巡检
+
+
+def test_freshness_guard_fresh_skips(monkeypatch):
+    monkeypatch.setattr(vf.store, "latest_kline_dates", lambda: {"600000": "2026-09-01"})
+    monkeypatch.setattr("base.store.calendar_repo.get_trade_days", lambda end=None: ["2026-09-01"])
+    out = vf.task_value_freshness_guard()
+    assert out["fresh"] is True
+
+
+def test_freshness_guard_stale_catches_up(monkeypatch):
+    monkeypatch.setattr(vf.store, "latest_kline_dates", lambda: {"600000": "2026-08-28"})
+    monkeypatch.setattr(
+        "base.store.calendar_repo.get_trade_days", lambda end=None: ["2026-08-28", "2026-08-31"]
+    )
+    called = {}
+
+    def fake_update():
+        called["x"] = 1
+        return {"todo": 1, "updated": 1, "failed": 0}
+
+    monkeypatch.setattr(vf, "task_value_daily_update", fake_update)
+    out = vf.task_value_freshness_guard()
+    assert out["fresh"] is False and called
+
+
 def test_quarterly_rebuild_runs_on_first_trading_day(monkeypatch):
     monkeypatch.setattr(vf.store, "latest_kline_dates", lambda: {"600000": "2026-07-01"})
     monkeypatch.setattr("base.store.calendar_repo.get_trade_days", lambda s, e: ["2026-07-01"])
