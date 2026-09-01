@@ -108,11 +108,11 @@ SCHEDULED_DEFS: dict[str, dict] = {
 VALUE_SCHEDULED_DEFS: dict[str, dict] = {
     "value_daily_update": {
         "label": "价值回归·个股数据日更",
-        "schedule": "工作日 16:30 · 收盘后",
-        "purpose": "每日增量拉取 618 只候选个股的 K 线/分红/ROE/PE, 仅重拉落后于最新交易日的个股(秒~分钟级)",
+        "schedule": "工作日 16:30 · 收盘后(启动时落后自动补跑)",
+        "purpose": "每日轻量增量更新 618 只候选个股: 仅拉最新K线窗+PE增量(≈10分钟), 完成后同步重建池预览; 分红/ROE 由全量任务覆盖",
         "data_flow": [
-            {"step": "fetch", "text": "腾讯前复权日K + 东财分红/ROE/PE-TTM(断点续传, 已最新者跳过)"},
-            {"step": "write", "text": "value_* 表增量写入 → 失效回测缓存并后台重算"},
+            {"step": "fetch", "text": "腾讯最新K线窗(自该股最新日起) + 东财 PE-TTM 增量行"},
+            {"step": "write", "text": "value_kline/value_pe 增量 upsert → 失效缓存 + 重建池预览"},
         ],
     },
     "value_quarterly_rebuild": {

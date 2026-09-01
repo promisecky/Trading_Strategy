@@ -148,6 +148,41 @@ def latest_kline_dates() -> dict[str, str]:
         conn.close()
 
 
+def upsert_kline(code: str, rows: list[tuple[str, float, float, float, float]]) -> None:
+    """增量写入K线(已存在日期覆盖, 新日期追加)。"""
+    conn = get_connection()
+    try:
+        conn.executemany(
+            "INSERT OR REPLACE INTO value_kline(code, date, open, close, high, low) VALUES(?,?,?,?,?,?)",
+            [(code, d, o, c, h, l) for d, o, c, h, l in rows],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def pe_max_date(code: str) -> str | None:
+    conn = get_connection()
+    try:
+        r = conn.execute("SELECT MAX(date) d FROM value_pe WHERE code=?", (code,)).fetchone()
+        return r["d"] if r else None
+    finally:
+        conn.close()
+
+
+def upsert_pe(code: str, rows: list[tuple[str, float]]) -> None:
+    """增量写入PE(已存在日期覆盖, 新日期追加)。"""
+    conn = get_connection()
+    try:
+        conn.executemany(
+            "INSERT OR REPLACE INTO value_pe(code, date, pe_ttm) VALUES(?,?,?)",
+            [(code, d, v) for d, v in rows],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_snapshot(code: str) -> dict | None:
     """组装引擎所需快照(静态部分; price/mcap/pe 由调用方按 as-of 注入)。"""
     info = get_stock_info(code)

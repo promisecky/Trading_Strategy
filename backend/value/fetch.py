@@ -283,9 +283,12 @@ def job_value_fetch(progress) -> dict:
     info_codes = _existing_codes()
     if not info_codes:
         info_codes = fetch_universe(progress)
-    latest_dates = store.latest_kline_dates()
-    universe_latest = max(latest_dates.values()) if latest_dates else ""
-    todo = [c for c in info_codes if latest_dates.get(c, "") < universe_latest]
+    from base.store.calendar_repo import get_trade_days
+
+    days = get_trade_days(end=datetime.now().strftime("%Y-%m-%d"))
+    target = days[-1] if days else (max(store.latest_kline_dates().values()) if store.latest_kline_dates() else "")
+    latest = store.latest_kline_dates()
+    todo = [c for c in info_codes if latest.get(c, "") < target]
     done = 0
     failed = 0
     for i, code in enumerate(todo):
@@ -326,8 +329,93 @@ def job_value_upgrade_kline(progress) -> dict:
 
 
 def task_value_daily_update() -> dict:
-    """定时任务(收盘后): 个股数据每日增量更新 — 仅重拉最新K线日落后的个股, 秒~分钟级。"""
-    return job_value_fetch(lambda c, t, m: print(f"[value-daily] {c}/{t} {m}"))
+    """定时任务(收盘后): 个股数据每日轻量增量更新(仅最新K线窗+PE增量)。"""
+    return job_value_daily_fetch(lambda c, t, m: print(f"[value-daily] {c}/{t} {m}"))
+
+
+def _fetch_pe_since(code: str, since: str) -> list[tuple[str, float]]:
+    """PE-TTM 增量: 仅拉取 since 之后的新行(东财估值明细, 按日降序)。"""
+    d = _https_json(
+        "https://datacenter.eastmoney.com/securities/api/data/v1/get",
+        {
+            "reportName": "RPT_VALUEANALYSIS_DET",
+            "columns": "TRADE_DATE,PE_TTM",
+            "filter": f'(SECURITY_CODE="{code}")(TRADE_DATE>\'{since}\')',
+            "pageNumber": 1, "pageSize": 500,
+            "sortColumns": "TRADE_DATE", "sortTypes": -1,
+            "source": "SECURITIES", "client": "PC",
+        },
+    )
+    out: list[tuple[str, float]] = []
+    for r in ((d or {}).get("result") or {}).get("data") or []:
+        pe = r.get("PE_TTM")
+        if pe is None:
+            continue
+        try:
+            out.append((str(r["TRADE_DATE"])[:10], float(pe)))
+        except (TypeError, ValueError, KeyError):
+            continue
+    return out
+
+
+def job_value_daily_fetch(progress) -> dict:
+    """日更轻量路径: 每只仅拉最新K线窗(自该股最新日起) + PE增量首页,
+    不拉分红/ROE(仅季报披露期变化, 由全量任务覆盖)。约 2 请求/只, 618 只≈10分钟。
+    完成后重建池预览, 保证卡片指标与最新数据同步。"""
+    latest = store.latest_kline_dates()
+    universe_latest = max(latest.values()) if latest else ""
+    info_codes = _existing_codes()
+    if not info_codes:
+        info_codes = fetch_universe(progress)
+        latest = store.latest_kline_dates()
+        universe_latest = max(latest.values()) if latest else ""
+    # 目标日 = 日历上≤今天的最近交易日(全宇宙落后于它才需更新, 而非互相比较)
+    from base.store.calendar_repo import get_trade_days
+
+    days = get_trade_days(end=datetime.now().strftime("%Y-%m-%d"))
+    target = days[-1] if days else universe_latest
+    todo = [c for c in info_codes if latest.get(c, "") < target]
+    today = datetime.now().strftime("%Y-%m-%d")
+    done = 0
+    failed = 0
+    for i, code in enumerate(todo):
+        n_kl = 0
+        try:
+            since = latest.get(code, "")
+            if not since:  # 新股无历史→全量
+                kl = _fetch_kline(code)
+                if kl:
+                    store.replace_kline(code, kl)
+                    n_kl = len(kl)
+            else:
+                symbol = ("sh" if code.startswith(("6", "9")) else "sz") + code
+                d = _tencent_kline(symbol, since, today)
+                if d is not None:
+                    node = d.get("data", {}).get(symbol, {})
+                    rows = node.get("qfqday") or node.get("day") or []
+                    new = []
+                    for r in rows:
+                        if len(r) >= 5 and r[0] and r[0] > since:
+                            try:
+                                new.append((r[0], float(r[1]), float(r[2]), float(r[3]), float(r[4])))
+                            except (TypeError, ValueError):
+                                continue
+                    if new:
+                        store.upsert_kline(code, new)
+                        n_kl = len(new)
+            pe_since = store.pe_max_date(code) or f"{KLINE_START_YEAR}-01-01"
+            new_pe = _fetch_pe_since(code, pe_since)
+            if new_pe:
+                store.upsert_pe(code, new_pe)
+            done += 1
+            progress(i + 1, len(todo), f"{code} +{n_kl}K +{len(new_pe)}PE")
+        except Exception as e:
+            failed += 1
+            print(f"[value-daily] {code} 更新异常: {type(e).__name__} {e}")
+        time.sleep(FETCH_SLEEP_SEC)
+    cache.invalidate_all()
+    job_value_rebuild_pool(lambda c, t, m: None)  # 池预览随数据同步刷新
+    return {"todo": len(todo), "updated": done, "failed": failed}
 
 
 def task_value_quarterly_rebuild() -> dict:
