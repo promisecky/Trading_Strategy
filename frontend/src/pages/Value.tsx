@@ -268,14 +268,22 @@ export default function Value() {
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-3">
                 <div className="text-xs text-gray-500 mb-2">当前持仓 ({positions.length}/{ov.max_slots})</div>
                 <div className="flex flex-wrap gap-2">
-                  {positions.map(([code, p]) => (
-                    <span key={code} className="px-2 py-1 rounded text-xs bg-gray-800 text-gray-300 border border-gray-700 cursor-pointer hover:border-gray-500"
-                      onClick={() => showKline(code)}>
-                      {code}
-                      <span className="text-gray-500 ml-1">成本 {p.cost.toFixed(2)}</span>
-                      <span className="text-gray-600 ml-1">@{p.buy_date} 起</span>
-                    </span>
-                  ))}
+                  {positions.map(([code, p]) => {
+                    const inPool = (ov.pool ?? []).some(pp => pp.code === code)
+                    return (
+                      <span key={code} className="px-2 py-1 rounded text-xs bg-gray-800 text-gray-300 border border-gray-700 cursor-pointer hover:border-gray-500"
+                        onClick={() => showKline(code)}>
+                        {code}
+                        <span className="text-gray-500 ml-1">成本 {p.cost.toFixed(2)}</span>
+                        <span className="text-gray-600 ml-1">@{p.buy_date} 起</span>
+                        {!inPool && (
+                          <span className="text-amber-400 ml-1" title="季度重建后已不在新池: 不强制卖, 继续按①止损/止盈/③bias≥1.08 三规则持有; 卖出后不再买回">
+                            出池·持有至卖出规则
+                          </span>
+                        )}
+                      </span>
+                    )
+                  })}
                 </div>
               </div>
             )}
