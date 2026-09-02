@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import type { ECharts } from 'echarts'
-import { fetchEtfHistory } from '../api/client'
+import { fetchEtfHistory, ETF_DATA_START } from '../api/client'
 import KlineChart from '../components/kline/KlineChart'
 import SignalHistoryChart from '../components/kline/SignalHistoryChart'
 import useIsMobile from '../hooks/useIsMobile'
 import type { ZoomWindow } from '../api/types'
 
-const HISTORY_DAYS = 2000  // 覆盖 2021 至今历史
+const HISTORY_DAYS = 2000  // 拉取窗口; 展示由 ETF_DATA_START 对齐因子链起点(2022-01-01)
 const SYNC_GROUP = 'etf-detail-sync'
 const DEFAULT_START_DATE = '2025-12-31'
 
@@ -18,7 +18,7 @@ export default function EtfDetail() {
   const isMobile = useIsMobile()
   const { data, isLoading } = useQuery({
     queryKey: ['etf', code, 'history', HISTORY_DAYS],
-    queryFn: () => fetchEtfHistory(code!, HISTORY_DAYS),
+    queryFn: () => fetchEtfHistory(code!, HISTORY_DAYS, ETF_DATA_START),
     enabled: !!code,
     refetchOnWindowFocus: false,
   })

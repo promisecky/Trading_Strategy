@@ -2,13 +2,13 @@ import { useCallback, useMemo, useRef } from 'react'
 import { useQuery, useQueries } from '@tanstack/react-query'
 import * as echarts from 'echarts'
 import type { ECharts } from 'echarts'
-import { fetchEtfList, fetchEtfHistory, fetchResonanceTrades } from '../api/client'
+import { fetchEtfList, fetchEtfHistory, fetchResonanceTrades, ETF_DATA_START } from '../api/client'
 import CompareKline from '../components/kline/CompareKline'
 import type { ZoomRange } from '../components/kline/CompareKline'
 import type { TradePoint } from '../api/types'
 import { usePinnedEtfs } from '../hooks/usePinnedEtfs'
 
-const KLINE_DAYS = 2000  // 覆盖 2021 至今历史
+const KLINE_DAYS = 2000  // 拉取窗口; 展示由 ETF_DATA_START 对齐因子链起点(2022-01-01)
 // 原生联动组: echarts.connect 让同组图在同一渲染批次内同步 dataZoom,
 // 相比手动 dispatchAction 转发(事后异步)能真正做到"一起滚动"
 const CHART_GROUP = 'klineCompare'
@@ -67,7 +67,7 @@ export default function KlineCompare() {
       queryKey: ['klineCompare', code],
       queryFn: async () => {
         const [history, trades] = await Promise.all([
-          fetchEtfHistory(code, KLINE_DAYS),
+          fetchEtfHistory(code, KLINE_DAYS, ETF_DATA_START),
           fetchResonanceTrades(code),
         ])
         return { code, name: history.name, idx: history.idx, kline: history.kline, signals: history.daily_signals, trades: trades.trades }

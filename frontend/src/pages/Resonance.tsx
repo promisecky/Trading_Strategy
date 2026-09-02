@@ -14,7 +14,7 @@ import { useAxisPointerBridge } from '../hooks/useAxisPointerBridge'
 import { DEFAULT_VISIBLE_BARS, type DateWindow } from '../components/common/chartZoom'
 import { unionDates, alignKlineToDates, alignResonanceHistoryToDates } from '../components/resonance/alignChartDates'
 
-const KLINE_DAYS = 3200  // 覆盖 2014-10 至今(中证1000 数据延伸起点, 约 2870 交易日)
+const KLINE_DAYS = 3200  // 拉取窗口; 展示由 useEtfHistory 内部对齐因子链起点(2022-01-01)
 
 export default function Resonance() {
   const [code, setCode] = useState('510300')  // 默认沪深300

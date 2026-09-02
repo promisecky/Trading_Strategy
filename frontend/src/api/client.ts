@@ -2,6 +2,9 @@ import type { SignalResponse, EtfHistoryResponse, EtfInfo, RealtimeStatus, Stats
 
 const BASE = `${__APP_BASE__}/api`
 
+// ETF 因子链(交易所官方成交额)稳定数据起点: 展示范围对齐该日期, 避免无信号空白区
+export const ETF_DATA_START = '2022-01-01'
+
 async function parseError(res: Response): Promise<Error> {
   let msg = `API error: ${res.status}`
   try {

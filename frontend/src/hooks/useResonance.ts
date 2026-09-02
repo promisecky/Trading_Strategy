@@ -1,5 +1,5 @@
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import { fetchResonance, fetchResonanceDay, fetchEtfHistory } from '../api/client'
+import { fetchResonance, fetchResonanceDay, fetchEtfHistory, ETF_DATA_START } from '../api/client'
 import { cacheGet, cacheSet, cacheValid, mergeByDate, settledData } from '../utils/idbCache'
 import { CACHE_SCHEMA, type ResonanceOverview, type ResonanceHistoryPoint, type EtfHistoryResponse, type KlinePoint, type DailySignal } from '../api/types'
 
@@ -48,8 +48,9 @@ async function fetchEtfHistoryCached(code: string, days: number): Promise<EtfHis
   const valid = cacheValid(kcached)
   const since = valid ? kcached.endDate : undefined
   const resp = await fetchEtfHistory(code, days, since)
-  const kMerged = mergeByDate(valid ? kcached.data : [], resp.kline)
-  const sMerged = mergeByDate(valid && scached ? scached.data : [], resp.daily_signals)
+  // 展示对齐因子链数据起点: 裁剪 2022 前的无信号K线(含 IndexedDB 缓存旧行)
+  const kMerged = mergeByDate(valid ? kcached.data : [], resp.kline).filter(k => k.date >= ETF_DATA_START)
+  const sMerged = mergeByDate(valid && scached ? scached.data : [], resp.daily_signals).filter(s => s.date >= ETF_DATA_START)
   const endDate = resp.safe_end ?? (valid ? kcached.endDate : '')
   const now = Date.now()
   await Promise.all([
