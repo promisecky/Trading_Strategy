@@ -261,12 +261,29 @@ def value_overview(idle_yield: float = Query(IDLE_YIELD_PCT)):
     if not st["ready"]:
         return {"ready": False, "hint": "无数据: 请在数据管理页运行「价值回归-拉取个股数据」"}
     final = st["final"]
+    # 持仓增强: 名称/现价/盈亏%/仓位%(按末日净值)
+    inp = _inputs()
+    equity = st["history"][-1]["equity"] if st["history"] else 1.0
+    positions = {}
+    for code, p in final["positions"].items():
+        kl = inp["kline"].get(code, {})
+        row = kl.get(st["last_date"]) or (kl[max(kl)] if kl else None)
+        price = row["close"] if row else None
+        pnl = round((price / p["cost"] - 1) * 100, 2) if price and p.get("cost") else None
+        weight = round(price * p["shares"] / equity * 100, 1) if price and equity else None
+        positions[code] = {
+            **p,
+            "name": inp["snapshots"].get(code, {}).get("name"),
+            "price": price,
+            "pnl_pct": pnl,
+            "weight_pct": weight,
+        }
     return {
         "ready": True,
         "last_date": st["last_date"],
         "pool_size": len(final["pool"]),
         "pool": final["pool"],
-        "positions": final["positions"],
+        "positions": positions,
         "slots_used": len(final["positions"]),
         "max_slots": MAX_SLOTS,
         "cooldown": [
@@ -337,9 +354,15 @@ def _pool_cards() -> list[dict]:
         c = p["code"]
         kl = inp["kline"].get(c, {})
         snap = inp["snapshots"].get(c, {})
-        row_last, row_prev = kl.get(last), kl.get(prev)
-        close = row_last["close"] if row_last else None
-        prev_close = row_prev["close"] if row_prev else None
+        # 个股自身最新两根K线(部分个股更新滞后于全局最新日时, 卡片仍展示自身最新值)
+        close = None
+        prev_close = None
+        if kl:
+            dmax = max(kl)
+            close = kl[dmax]["close"]
+            prior = [d for d in kl if d < dmax]
+            if prior:
+                prev_close = kl[max(prior)]["close"]
         chg = round((close / prev_close - 1) * 100, 2) if close and prev_close else None
         # 滚动一年股息率(已除权口径)
         dy = None

@@ -426,15 +426,18 @@ def job_value_daily_fetch(progress) -> dict:
 
 
 def task_value_freshness_guard() -> dict:
-    """小时级巡检(共享 ETF 交易日历): 数据落后于日历最近交易日即追更,
+    """小时级巡检(共享 ETF 交易日历): 任一个股落后于日历最近交易日即追更(含部分落后),
     新鲜时零开销直接返回 — 彻底兼容 调度错过/停机/网络抽风 等场景。"""
     from base.store.calendar_repo import get_trade_days
 
     latest = store.latest_kline_dates()
     cur = max(latest.values()) if latest else ""
     days = get_trade_days(end=datetime.now().strftime("%Y-%m-%d"))
-    if days and cur < days[-1]:
-        print(f"[value-guard] stale ({cur} < {days[-1]}), catching up...")
+    target = days[-1] if days else cur
+    info_codes = _existing_codes()
+    lagging = [c for c in info_codes if latest.get(c, "") < target]
+    if lagging:
+        print(f"[value-guard] stale: max={cur} target={target} lagging={len(lagging)}, catching up...")
         res = task_value_daily_update()
         return {"fresh": False, **res}
     return {"fresh": True, "latest": cur}

@@ -174,20 +174,13 @@ def start_scheduler() -> None:
 
 
 def _value_startup_catchup() -> None:
-    """启动补跑: 若个股数据落后于最近交易日(停机/错过调度窗口), 立即轻量增量更新+重建池,
-    保证重启后页面数据始终是最新交易日。"""
+    """启动补跑: 任一个股落后于最近交易日(含部分落后)即追更, 保证重启后页面数据最新。"""
     time.sleep(15)
     try:
-        from base.store.calendar_repo import get_trade_days
-        from value import store
-        from value.fetch import task_value_daily_update
+        from value.fetch import task_value_freshness_guard
 
-        latest = store.latest_kline_dates()
-        cur = max(latest.values()) if latest else ""
-        days = get_trade_days(end=datetime.now().strftime("%Y-%m-%d"))
-        if days and cur < days[-1]:
-            print(f"[SCHEDULER] value data stale ({cur} < {days[-1]}), catch-up updating...")
-            task_value_daily_update()
+        res = task_value_freshness_guard()
+        if not res.get("fresh"):
             print("[SCHEDULER] value catch-up done")
     except Exception as e:
         print(f"[SCHEDULER] value catch-up failed: {type(e).__name__} {e}")

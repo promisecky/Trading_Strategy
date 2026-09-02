@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useQueries } from '@tanstack/react-query'
 import {
   fetchValueOverview, fetchValueBacktest, fetchValuePool, fetchValueKline, fetchValueIndicators,
@@ -87,6 +87,15 @@ export default function Value() {
 
   const cards = poolQ.data?.cards ?? []
   const heldCodes = Object.keys(ov?.positions ?? {})
+  // 代码→名称映射(池卡片 + 持仓增强), 供勾选栏/持仓条展示
+  const nameOf = (code: string) =>
+    cards.find(c => c.code === code)?.name ?? (ov?.positions ?? {})[code]?.name ?? ''
+  // 信号日净值映射: 交易仓位占比 = 归一金额 ÷ 信号日净值
+  const equityByDate = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const h of backtest.data?.history ?? []) m.set(h.date, h.equity)
+    return m
+  }, [backtest.data])
   // K线栏候选 = 股票池 ∪ 当前持仓
   const klineCandidates = [...new Set([...cards.map(c => c.code), ...heldCodes])]
 
@@ -273,8 +282,15 @@ export default function Value() {
                     return (
                       <span key={code} className="px-2 py-1 rounded text-xs bg-gray-800 text-gray-300 border border-gray-700 cursor-pointer hover:border-gray-500"
                         onClick={() => showKline(code)}>
-                        {code}
+                        {code} {p.name ?? ''}
                         <span className="text-gray-500 ml-1">成本 {p.cost.toFixed(2)}</span>
+                        {p.price != null && <span className="text-gray-500 ml-1">现 {p.price.toFixed(2)}</span>}
+                        {p.pnl_pct != null && (
+                          <span className={`ml-1 font-mono ${p.pnl_pct >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+                            {p.pnl_pct >= 0 ? '+' : ''}{p.pnl_pct}%
+                          </span>
+                        )}
+                        {p.weight_pct != null && <span className="text-sky-400 ml-1">仓位 {p.weight_pct}%</span>}
                         <span className="text-gray-600 ml-1">@{p.buy_date} 起</span>
                         {!inPool && (
                           <span className="text-amber-400 ml-1" title="季度重建后已不在新池: 不强制卖, 继续按①止损/止盈/③bias≥1.08 三规则持有; 卖出后不再买回">
@@ -291,7 +307,9 @@ export default function Value() {
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-xs text-gray-500">交易记录留存（共 {backtest.data.trades.length} 条）</div>
-                <div className="text-[11px] text-gray-600">收盘确认信号 → 次日开盘成交 · 单票=总资产÷5 · 止损后冷却60交易日</div>
+                <div className="text-[11px] text-gray-600" title="回测以期初净值=1 归一化: 单票金额=信号日总资产÷5, 故仓位占比恒≈20%; 实际下单按自有等比例放大即可">
+                  归一化回测(期初=1): 单票=信号日总资产÷5 · 仓位占比≈20%/笔
+                </div>
               </div>
               <div className="overflow-x-auto max-h-[480px] overflow-y-auto">
                 <table className="w-full text-xs">
@@ -302,34 +320,36 @@ export default function Value() {
                       <th className="text-left py-1.5 pr-3">标的</th>
                       <th className="text-left py-1.5 pr-3">操作</th>
                       <th className="text-right py-1.5 pr-3">价格</th>
-                      <th className="text-right py-1.5 pr-3">股数</th>
-                      <th className="text-right py-1.5 pr-3">金额(归一)</th>
+                      <th className="text-right py-1.5 pr-3">仓位占比</th>
                       <th className="text-right py-1.5 pr-3">盈亏%</th>
                       <th className="text-left py-1.5">理由</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {[...backtest.data.trades].reverse().map((t, i) => (
-                      <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                        <td className="py-1.5 pr-3 text-gray-400 font-mono">{t.exec_date}</td>
-                        <td className="py-1.5 pr-3 text-gray-600 font-mono">{t.date}</td>
-                        <td className="py-1.5 pr-3 text-gray-300">
-                          <button className="hover:text-sky-400" onClick={() => showKline(t.code)}>
-                            {t.code} {t.name ?? ''}
-                          </button>
-                        </td>
-                        <td className={`py-1.5 pr-3 ${t.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>
-                          {t.action === 'BUY' ? (t.kind === 'side' ? '买·侧门' : '买·主信号') : `卖·${RULE_LABEL[t.rule ?? 0] ?? t.rule}`}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right text-gray-400 font-mono">{t.price.toFixed(2)}</td>
-                        <td className="py-1.5 pr-3 text-right text-gray-400 font-mono">{t.shares.toFixed(0)}</td>
-                        <td className="py-1.5 pr-3 text-right text-gray-300 font-mono">{t.amount.toFixed(3)}</td>
-                        <td className={`py-1.5 pr-3 text-right font-mono ${t.pnl_pct != null ? (t.pnl_pct >= 0 ? 'text-red-400' : 'text-green-400') : 'text-gray-600'}`}>
-                          {t.pnl_pct != null ? `${t.pnl_pct > 0 ? '+' : ''}${t.pnl_pct}` : '-'}
-                        </td>
-                        <td className="py-1.5 text-gray-500">{t.reason}</td>
-                      </tr>
-                    ))}
+                    {[...backtest.data.trades].reverse().map((t, i) => {
+                      const eq = equityByDate.get(t.date)
+                      const weight = eq ? ((t.amount / eq) * 100).toFixed(1) : '-'
+                      return (
+                        <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <td className="py-1.5 pr-3 text-gray-400 font-mono">{t.exec_date}</td>
+                          <td className="py-1.5 pr-3 text-gray-600 font-mono">{t.date}</td>
+                          <td className="py-1.5 pr-3 text-gray-300">
+                            <button className="hover:text-sky-400" onClick={() => showKline(t.code)}>
+                              {t.code} {t.name ?? ''}
+                            </button>
+                          </td>
+                          <td className={`py-1.5 pr-3 ${t.action === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>
+                            {t.action === 'BUY' ? (t.kind === 'side' ? '买·侧门' : '买·主信号') : `卖·${RULE_LABEL[t.rule ?? 0] ?? t.rule}`}
+                          </td>
+                          <td className="py-1.5 pr-3 text-right text-gray-400 font-mono">{t.price.toFixed(2)}</td>
+                          <td className="py-1.5 pr-3 text-right text-gray-400 font-mono">{weight}%</td>
+                          <td className={`py-1.5 pr-3 text-right font-mono ${t.pnl_pct != null ? (t.pnl_pct >= 0 ? 'text-red-400' : 'text-green-400') : 'text-gray-600'}`}>
+                            {t.pnl_pct != null ? `${t.pnl_pct > 0 ? '+' : ''}${t.pnl_pct}` : '-'}
+                          </td>
+                          <td className="py-1.5 text-gray-500">{t.reason}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -344,15 +364,21 @@ export default function Value() {
       {tab === 'kline' && (
         <div className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap text-xs">
+            <button
+              onClick={() => setKlineCodes(prev => [...new Set([...prev, ...heldCodes])])}
+              disabled={heldCodes.length === 0}
+              className="shrink-0 px-2.5 py-1 rounded bg-sky-600/20 text-sky-300 border border-sky-500/40 hover:bg-sky-600/30 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              一键选中持仓({heldCodes.length})
+            </button>
             <span className="text-gray-500">勾选查看(股票池 ∪ 持仓):</span>
             {klineCandidates.map(code => {
-              const name = cards.find(c => c.code === code)?.name
               return (
                 <label key={code} className="flex items-center gap-1.5 cursor-pointer select-none">
                   <input type="checkbox" checked={klineCodes.includes(code)} onChange={() => toggleKline(code)}
                     className="accent-sky-500 w-3.5 h-3.5" />
                   <span className={klineCodes.includes(code) ? 'text-gray-300' : 'text-gray-600'}>
-                    {code} {name ?? ''}
+                    {code} {nameOf(code)}
                   </span>
                 </label>
               )

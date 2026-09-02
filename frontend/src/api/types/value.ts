@@ -26,6 +26,10 @@ export interface ValuePosition {
   shares: number
   cost: number
   buy_date: string
+  name?: string | null
+  price?: number | null
+  pnl_pct?: number | null
+  weight_pct?: number | null
 }
 
 export interface ValueSellSignal {

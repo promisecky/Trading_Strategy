@@ -35,6 +35,7 @@ def test_quarterly_rebuild_skips_non_first_trading_day(monkeypatch):
 
 def test_freshness_guard_fresh_skips(monkeypatch):
     monkeypatch.setattr(vf.store, "latest_kline_dates", lambda: {"600000": "2026-09-01"})
+    monkeypatch.setattr(vf, "_existing_codes", lambda: ["600000"])
     monkeypatch.setattr("base.store.calendar_repo.get_trade_days", lambda end=None: ["2026-09-01"])
     out = vf.task_value_freshness_guard()
     assert out["fresh"] is True
@@ -42,6 +43,7 @@ def test_freshness_guard_fresh_skips(monkeypatch):
 
 def test_freshness_guard_stale_catches_up(monkeypatch):
     monkeypatch.setattr(vf.store, "latest_kline_dates", lambda: {"600000": "2026-08-28"})
+    monkeypatch.setattr(vf, "_existing_codes", lambda: ["600000"])
     monkeypatch.setattr(
         "base.store.calendar_repo.get_trade_days", lambda end=None: ["2026-08-28", "2026-08-31"]
     )
