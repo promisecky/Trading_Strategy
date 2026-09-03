@@ -3,7 +3,7 @@ import ReactECharts from 'echarts-for-react'
 import * as echarts from 'echarts'
 import type { ValueKlineResponse } from '../../api/types'
 
-const RULE_LABEL: Record<number, string> = { 1: '①止损-12%', 2: '②止盈+10%', 3: '③bias≥1.08' }
+const RULE_LABEL: Record<number, string> = { 1: '①动态止损', 2: '②移动止盈', 3: '③bias≥1.08' }
 
 /** 个股 K 线(对标 ETF 走势对比): 蜡烛图 + MA120 + 买/卖标记;
  *  high/low 缺失(升级抓取中)时自动降级为收盘价折线。

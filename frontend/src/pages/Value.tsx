@@ -10,7 +10,7 @@ import ValuePoolCardView from '../components/value/ValuePoolCard'
 import ValueStockKline from '../components/value/ValueStockKline'
 import ValueIndicatorsChart from '../components/value/ValueIndicatorsChart'
 
-const RULE_LABEL: Record<number, string> = { 1: '①止损-12%', 2: '②止盈+10%', 3: '③bias≥1.08' }
+const RULE_LABEL: Record<number, string> = { 1: '①动态止损', 2: '②移动止盈', 3: '③bias≥1.08' }
 
 /** 数据管理栏: 手动任务定义(与后端 job_registry 对应) */
 const MANUAL_JOBS = [
@@ -142,7 +142,7 @@ export default function Value() {
             </button>
           </div>
           <p className="text-[11px] text-gray-600">
-            策略: 季度首日七道门选白马 → 恐慌深坑(bias≤0.88 且企稳)买入 → +10%/-12%/bias≥1.08 卖出 → 5 槽等权, 闲钱货币化
+            策略: 季度首日七道门选白马 → 恐慌深坑(bias≤0.88 且企稳)买入 → 动态止损/移动止盈(+8%激活,回落4%卖)/bias≥1.08 卖出 → 5 槽等权, 闲钱货币化
           </p>
         </div>
       </div>
@@ -293,7 +293,7 @@ export default function Value() {
                         {p.weight_pct != null && <span className="text-sky-400 ml-1">仓位 {p.weight_pct}%</span>}
                         <span className="text-gray-600 ml-1">@{p.buy_date} 起</span>
                         {!inPool && (
-                          <span className="text-amber-400 ml-1" title="季度重建后已不在新池: 不强制卖, 继续按①止损/止盈/③bias≥1.08 三规则持有; 卖出后不再买回">
+                          <span className="text-amber-400 ml-1" title="季度重建后已不在新池: 不强制卖, 继续按①动态止损/②移动止盈/③bias≥1.08 三规则持有; 卖出后不再买回">
                             出池·持有至卖出规则
                           </span>
                         )}

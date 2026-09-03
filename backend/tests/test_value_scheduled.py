@@ -70,9 +70,10 @@ def test_quarterly_rebuild_runs_on_first_trading_day(monkeypatch):
 
 
 def test_single_stock_full_position_round_trip():
-    """slot_divisor=1: 单票独立视角全仓买入, +11.1% 往返全部落袋(对比组合 5 槽仅 +2.2%)。"""
+    """slot_divisor=1: 单票独立视角全仓买入, 移动止盈回落卖 +11.1% 往返全部落袋。"""
     closes = dip_closes()
-    closes[150] = 1.00  # 触发止盈
+    closes[150] = 1.05  # 激活
+    closes[151] = 1.00  # 回落卖
     opens = {121: 0.90}
     res = run_backtest(
         DATES, {"A": kline_from(closes, opens)}, {"A": snap("A")}, pe_const(["A"]),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 
 from value.engine import (
+    activity_series,
     bias_series,
     build_pool,
     buy_signals,
@@ -150,26 +151,52 @@ def test_z_warmup_and_hand_computed():
 # ---------------------------------------------------------------- 卖出优先级
 
 
-def _q(code, close, prev_close=None, bias=None, z=None, pe=None, ind="食品饮料"):
-    return {"code": code, "close": close, "prev_close": prev_close if prev_close is not None else close, "bias": bias, "z": z, "pe_ttm": pe, "industry": ind}
+def _q(code, close, prev_close=None, bias=None, z=None, pe=None, ind="食品饮料", act=None):
+    return {"code": code, "close": close, "prev_close": prev_close if prev_close is not None else close, "bias": bias, "z": z, "pe_ttm": pe, "industry": ind, "act": act}
 
 
 def test_sell_priority_and_rules():
-    pos = {"A": {"cost": 10.0}, "B": {"cost": 10.0}, "C": {"cost": 10.0}, "D": {"cost": 10.0}}
+    pos = {"A": {"cost": 10.0}, "C": {"cost": 10.0}, "D": {"cost": 10.0}}
     quotes = {
-        "A": _q("A", 8.8, bias=1.2),  # ①+③ 同触 → ①
-        "B": _q("B", 11.0),  # ②
+        "A": _q("A", 8.8, bias=1.2),  # ①(8.8 ≤ 9.2)+③ 同触 → ①
         "C": _q("C", 10.5, bias=1.08),  # ③
         "D": _q("D", 10.5, bias=1.0),  # 不触发
     }
     sig = {s["code"]: s for s in sell_signals(pos, quotes)}
     assert sig["A"]["rule"] == 1
-    assert sig["B"]["rule"] == 2
     assert sig["C"]["rule"] == 3
     assert "D" not in sig
-    # ② 优先于 ③
-    sig2 = sell_signals({"X": {"cost": 10.0}}, {"X": _q("X", 11.5, bias=1.2)})
-    assert sig2[0]["rule"] == 2
+    # ② 移动止盈: 首日+20%激活不卖, 次日自高点回落≥4% 卖; 与③同触时②优先
+    posB = {"B": {"cost": 10.0}}
+    assert sell_signals(posB, {"B": _q("B", 12.0)}) == []  # 激活, 无信号
+    assert posB["B"]["armed"] and posB["B"]["max_close"] == 12.0
+    sig2 = {s["code"]: s for s in sell_signals(posB, {"B": _q("B", 11.4, bias=1.2)})}  # 回落+③同触
+    assert sig2["B"]["rule"] == 2
+
+
+def test_dynamic_stop_quiet_vs_heavy():
+    """缩幅阴跌(水位0.3)→ s=0.92-0.04×0.7=0.892 抗洗盘; 放幅急跌(水位2.0)→ s=0.92+0.05×0.5=0.945 砍出货。"""
+    pos = {"Q": {"cost": 10.0}, "H": {"cost": 10.0}}
+    sig = {s["code"]: s for s in sell_signals(pos, {"Q": _q("Q", 8.95, act=0.3), "H": _q("H", 8.95, act=2.0)})}
+    assert "Q" not in sig  # 8.95 > 8.92 → 宽限
+    assert sig["H"]["rule"] == 1  # 8.95 ≤ 9.45 → 收紧
+
+
+def test_trailing_cap30():
+    pos = {"X": {"cost": 10.0}}
+    sell_signals(pos, {"X": _q("X", 11.0)})  # 激活
+    sig = sell_signals(pos, {"X": _q("X", 13.0)})  # +30% 封顶
+    assert sig[0]["rule"] == 2
+
+
+def test_activity_series_trailing_only():
+    r = [0.02] * 100
+    a1 = activity_series(r)
+    r2 = list(r)
+    r2[99] = 0.5
+    a2 = activity_series(r2)
+    assert a1[50] == a2[50]  # 未来幅度变化不影响历史水位(无前视)
+    assert a1[99] != a2[99]
 
 
 # ---------------------------------------------------------------- 买入规则

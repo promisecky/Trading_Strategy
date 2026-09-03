@@ -84,24 +84,25 @@ def test_buy_executes_next_open_with_slot_sizing():
 
 def test_take_profit_rule2_no_cooldown():
     closes = dip_closes()
-    closes[150] = 1.00  # ≥ 0.90×1.10=0.99 → ②
+    closes[150] = 1.05  # ≥ 0.90×1.08 → 移动止盈激活
+    closes[151] = 1.00  # ≤ 1.05×0.96=1.008 → 回落卖, 151 信号 152 执行
     opens = {121: 0.90}
     res = run_backtest(DATES, {"A": kline_from(closes, opens)}, {"A": snap("A")}, pe_const(["A"]), idle_yield_pct=0.0)
     sells = [t for t in res["trade_log"] if t["action"] == "SELL"]
     assert len(sells) == 1 and sells[0]["rule"] == 2
-    assert sells[0]["exec_date"] == DATES[151]
+    assert sells[0]["exec_date"] == DATES[152]
     assert "A" not in res["final"]["cooldown_until"]
 
 
-def test_stop_loss_rule1_and_60d_cooldown():
+def test_stop_loss_rule1_and_40d_cooldown():
     closes = dip_closes()
-    closes[150] = 0.79  # ≤ 0.90×0.88=0.792 → ①
+    closes[150] = 0.79  # ≤ 0.90×0.92=0.828 → ①(动态止损, 无高低数据时水位=1)
     # 冷却期内再给主信号(第170/171日砸坑企稳) → 必须忽略
     closes[170] = 0.75
     closes[171] = 0.76
     for i in range(172, 230):
         closes[i] = 0.76  # 持平不触发买(收盘未>昨收)
-    # 冷却结束后(150+60=210 之后)再给信号 → 可买(深坑保证 bias≤0.88)
+    # 冷却结束后(151+40=191 之后)再给信号 → 可买(深坑保证 bias≤0.88)
     closes[230] = 0.70
     closes[231] = 0.71
     opens = {121: 0.90}
@@ -110,7 +111,7 @@ def test_stop_loss_rule1_and_60d_cooldown():
     sells = [t for t in res["trade_log"] if t["action"] == "SELL"]
     assert sells[0]["rule"] == 1
     assert [b["date"] for b in buys] == [DATES[120], DATES[231]]  # 170 日信号被冷却吞掉
-    assert res["final"]["cooldown_until"]["A"] == 151 + 60  # 自止损执行日起算
+    assert res["final"]["cooldown_until"]["A"] == 151 + 40  # 自止损执行日起算
 
 
 def test_max_five_slots_no_swap():
@@ -146,12 +147,13 @@ def test_quarterly_rebuild_and_gate_filter():
 
 def test_metrics_round_trip():
     closes = dip_closes()
-    closes[150] = 1.00
+    closes[150] = 1.05  # 激活移动止盈
+    closes[151] = 1.00  # 回落卖, 执行价 1.00 → +11.1%
     opens = {121: 0.90}
     res = run_backtest(DATES, {"A": kline_from(closes, opens)}, {"A": snap("A")}, pe_const(["A"]), idle_yield_pct=0.0)
     m = res["metrics"]
     assert m["round_count"] == 1 and m["win_rate_pct"] == 100.0
-    # 1/5 仓位 +10% → 总收益 ≈ +2%
+    # 1/5 仓位 +11.1% → 总收益 ≈ +2.2%
     assert abs(m["total_return_pct"] - 2.22) < 0.15
     assert m["max_drawdown_pct"] <= 0.0
 

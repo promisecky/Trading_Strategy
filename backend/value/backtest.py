@@ -22,6 +22,7 @@ from value.config import (
     TRADING_DAYS_PER_YEAR,
 )
 from value.engine import (
+    activity_series,
     bias_series,
     build_pool,
     buy_signals,
@@ -80,19 +81,25 @@ def run_backtest(
     # 指标序列按 dates 对齐: 停牌日用前收盘填充(价格不变, 指标连续), 上市前为 None(暖机期)
     bias_by_code: dict[str, dict[str, float]] = {}
     z_by_code: dict[str, dict[str, float]] = {}
+    act_by_code: dict[str, dict[str, float]] = {}
     cf_close: dict[str, dict[str, float]] = {}  # 前收盘填充表(停牌日估值用)
     for c, kl in kline.items():
         cs: list[float | None] = []
+        rng: list[float | None] = []
         last: float | None = None
         for d in dates:
             row = kl.get(d)
             if row is not None:
                 last = row["close"]
+                rng.append((row["high"] - row["low"]) / row["close"] if row.get("high") and row["close"] else None)
+            else:
+                rng.append(None)
             cs.append(last)
         bs = bias_series(cs)
         zs = z_series(bs)
         bias_by_code[c] = {d: b for d, b in zip(dates, bs) if b is not None}
         z_by_code[c] = {d: z for d, z in zip(dates, zs) if z is not None}
+        act_by_code[c] = {d: a for d, a in zip(dates, activity_series(rng)) if a is not None}
         cf_close[c] = {d: v for d, v in zip(dates, cs) if v is not None}
 
     daily_factor = (1 + idle_yield_pct / 100) ** (1 / TRADING_DAYS_PER_YEAR) if idle_yield_pct else 1.0
@@ -202,6 +209,7 @@ def run_backtest(
                 "prev_close": kline[c][dates[idx - 1]]["close"],
                 "bias": bias_by_code[c].get(d),
                 "z": z_by_code[c].get(d),
+                "act": act_by_code[c].get(d),
                 "pe_ttm": pe_series.get(c, {}).get(d),
                 "industry": snapshots[c].get("industry", ""),
             }

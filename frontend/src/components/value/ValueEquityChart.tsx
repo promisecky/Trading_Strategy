@@ -2,7 +2,7 @@ import ReactECharts from 'echarts-for-react'
 import { useMemo, useState } from 'react'
 import type { ValueHistoryPoint, ValueTrade } from '../../api/types'
 
-const RULE_LABEL: Record<number, string> = { 1: '①止损-12%', 2: '②止盈+10%', 3: '③bias≥1.08' }
+const RULE_LABEL: Record<number, string> = { 1: '①动态止损', 2: '②移动止盈', 3: '③bias≥1.08' }
 const BUY_COLOR = '#4ade80' // 买=绿(与页面信号表一致)
 const SELL_COLOR = '#f87171'
 

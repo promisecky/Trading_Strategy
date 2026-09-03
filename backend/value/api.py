@@ -21,8 +21,8 @@ from base.scheduler.scheduled_defs import VALUE_SCHEDULED_DEFS
 from base.scheduler.tasks import scheduler
 from value import cache, store
 from value.backtest import run_backtest
-from value.config import DY_LOOKBACK_DAYS, IDLE_FUND_CODE, IDLE_FUND_NAME, IDLE_YIELD_PCT, MA_WINDOW, MAX_SLOTS
-from value.engine import bias_series, buy_signals, cooldown_active, sell_signals, z_series
+from value.config import DY_LOOKBACK_DAYS, IDLE_FUND_CODE, IDLE_FUND_NAME, IDLE_YIELD_PCT, MA_WINDOW, MAX_SLOTS, RULES_VERSION
+from value.engine import activity_series, bias_series, buy_signals, cooldown_active, sell_signals, z_series
 
 router = APIRouter(prefix="/api/value", tags=["value"])
 
@@ -110,20 +110,26 @@ def _compute_state(start: str, idle_yield: float) -> dict:
             "pe_ttm": inp["pe"].get(c, {}).get(last),
             "industry": inp["snapshots"].get(c, {}).get("industry", ""),
         }
-    # 末日 bias/z 从回测内部不可得 → 用引擎序列重算(停牌日前收盘填充, 与回测口径一致)
+    # 末日 bias/z/act 从回测内部不可得 → 用引擎序列重算(停牌日前收盘填充, 与回测口径一致)
     for c in quotes:
         kl = inp["kline"][c]
         cs: list[float | None] = []
+        rng: list[float | None] = []
         last_close: float | None = None
         for d in dates:
             row = kl.get(d)
             if row is not None:
                 last_close = row["close"]
+                rng.append((row["high"] - row["low"]) / row["close"] if row.get("high") and row["close"] else None)
+            else:
+                rng.append(None)
             cs.append(last_close)
         b = bias_series(cs)
         z = z_series(b)
+        act = activity_series(rng)
         quotes[c]["bias"] = b[-1]
         quotes[c]["z"] = z[-1]
+        quotes[c]["act"] = act[-1] if act else None
     sells = sell_signals(final["positions"], quotes)
     free = MAX_SLOTS - len(final["positions"]) + len(sells)
     cd = {c for c in final["cooldown_until"] if cooldown_active(final["cooldown_until"], c, idx)}
@@ -161,7 +167,7 @@ def _persist_state(key: tuple, st: dict) -> None:
         return
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"fp": _fingerprint(), "key": list(key), "state": st}, f, ensure_ascii=False)
+            json.dump({"fp": _fingerprint(), "key": list(key), "rules": RULES_VERSION, "state": st}, f, ensure_ascii=False)
     except Exception as e:
         print(f"[value] persist state failed: {type(e).__name__} {e}")
 
@@ -171,7 +177,7 @@ def _load_persisted() -> tuple[tuple, dict] | None:
     try:
         with open(STATE_FILE, encoding="utf-8") as f:
             d = json.load(f)
-        if d.get("fp") != _fingerprint() or not d.get("state", {}).get("ready"):
+        if d.get("fp") != _fingerprint() or d.get("rules") != RULES_VERSION or not d.get("state", {}).get("ready"):
             return None
         return tuple(d["key"]), d["state"]
     except Exception:

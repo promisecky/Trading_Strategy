@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import math
 import statistics
+from bisect import bisect_left, insort
 from datetime import datetime, timedelta
 
 from value.config import (
+    BIAS_EXIT,
     BIAS_MAIN,
     BIAS_SIDE_HI,
     BIAS_SIDE_LO,
@@ -37,12 +39,45 @@ from value.config import (
     REAL_ESTATE_KEYWORDS,
     ROE_MIN_PCT,
     ROE_YEARS,
-    STOP_LOSS,  # noqa: F401
-    TAKE_PROFIT,  # noqa: F401
-    BIAS_EXIT,  # noqa: F401
+    STOP_BASE,
+    STOP_TIGHTEN,
+    STOP_WIDEN,
+    TP_ARM,
+    TP_CAP,
+    TP_TRAIL,
     Z_SIDE,
     Z_WINDOW,
 )
+
+
+def activity_series(ranges: list[float | None]) -> list[float | None]:
+    """幅度水位 = 近5日均(高-低)/收 ÷ 近60日中位数(成交量代理, 纯 trailing 无前视)。
+    <1 缩幅(洗盘特征), >1.5 放幅(出货/恐慌未竭)。"""
+    n = len(ranges)
+    out: list[float | None] = [None] * n
+    win: list[float] = []
+    for i, r in enumerate(ranges):
+        if i >= 60 and ranges[i - 60] is not None:
+            win.pop(bisect_left(win, ranges[i - 60]))
+        if r is not None:
+            insort(win, r)
+        if r is None or len(win) < 30:
+            continue
+        recent = [x for x in ranges[max(0, i - 4) : i + 1] if x is not None]
+        med = win[len(win) // 2]
+        if recent and med > 0:
+            out[i] = (sum(recent) / len(recent)) / med
+    return out
+
+
+def _clip(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def dynamic_stop(act: float | None) -> float:
+    """动态止损线: 基准 0.92, 缩幅阴跌放宽(抗洗盘), 放幅急跌收紧(砍出货)。"""
+    a = act if act is not None else 1.0
+    return STOP_BASE - STOP_WIDEN * _clip(1 - a, 0, 1) + STOP_TIGHTEN * _clip(a - 1.5, 0, 1)
 
 
 # ---------------------------------------------------------------- 指标
@@ -225,10 +260,10 @@ def _industry_pe_medians(quotes: list[dict]) -> dict[str, float]:
 
 
 def sell_signals(positions: dict[str, dict], quotes_by_code: dict[str, dict]) -> list[dict]:
-    """持仓每日收盘检查, 按 ①止损→②止盈→③bias 优先级触发其一。
+    """持仓每日收盘检查, 按 ①动态止损→②移动止盈→③bias 优先级触发其一。
 
-    positions: {code: {"cost": float, ...}}; 返回 [{code, rule, reason}]。
-    """
+    移动止盈状态(armed/max_close)存于 positions 条目, 随日滚动更新(调用方持有同一 dict)。
+    返回 [{code, rule, reason}]。"""
     out = []
     for code, pos in positions.items():
         q = quotes_by_code.get(code)
@@ -236,11 +271,31 @@ def sell_signals(positions: dict[str, dict], quotes_by_code: dict[str, dict]) ->
         if q is None or not cost:
             continue
         close = q["close"]
-        if close <= cost * STOP_LOSS:
-            out.append({"code": code, "rule": 1, "reason": f"①止损: 收盘{close:.2f} ≤ 成本{cost:.2f}×{STOP_LOSS}"})
-        elif close >= cost * TAKE_PROFIT:
-            out.append({"code": code, "rule": 2, "reason": f"②止盈: 收盘{close:.2f} ≥ 成本{cost:.2f}×{TAKE_PROFIT}"})
-        elif q.get("bias") is not None and q["bias"] >= BIAS_EXIT:
+        # ① 动态止损: 缩幅阴跌放宽(抗洗盘), 放幅急跌收紧(砍出货)
+        s = dynamic_stop(q.get("act"))
+        if close <= cost * s:
+            out.append(
+                {"code": code, "rule": 1,
+                 "reason": f"①动态止损: 收盘{close:.2f} ≤ 成本{cost:.2f}×{s:.3f}(水位{q.get('act') or 1.0:.2f})"}
+            )
+            continue
+        # ② 移动止盈: +8% 激活 → 自最高收盘回落4% 或 +30% 封顶
+        armed = bool(pos.get("armed"))
+        max_close = pos.get("max_close") or 0.0
+        if not armed and close >= cost * TP_ARM:
+            armed, max_close = True, close
+        if armed:
+            max_close = max(max_close, close)
+            if close <= max_close * TP_TRAIL or close >= cost * TP_CAP:
+                out.append(
+                    {"code": code, "rule": 2,
+                     "reason": f"②移动止盈: 最高{max_close:.2f} 回落≥4%或触+30%封顶"}
+                )
+                pos["armed"], pos["max_close"] = armed, max_close
+                continue
+        pos["armed"], pos["max_close"] = armed, max_close
+        # ③ 情绪修复离场
+        if q.get("bias") is not None and q["bias"] >= BIAS_EXIT:
             out.append({"code": code, "rule": 3, "reason": f"③情绪修复: bias {q['bias']:.3f} ≥ {BIAS_EXIT}"})
     return out
 
