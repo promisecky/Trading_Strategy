@@ -157,12 +157,12 @@ JOB_DEFS: dict[str, dict] = {
         ],
     },
     "value_upgrade_kline": {
-        "label": "价值回归-升级K线(补高低价)",
-        "exclusive": False,
+        "label": "价值回归-升级K线(RAW+HFQ双价迁移)",
+        "exclusive": True,
         "defaults": {},
         "data_flow": [
-            {"step": "fetch", "text": "为缺 high/low 的存量个股重拉全量前复权 K 线"},
-            {"step": "write", "text": "value_kline 覆盖写入, 幂等可断点续传"},
+            {"step": "fetch", "text": "为缺 HFQ 价的存量个股重拉 RAW+HFQ 双价全量K线 + 每笔分红(NaT修复)"},
+            {"step": "write", "text": "不变量校验(复权比≥1且单调不减)后覆盖写入, 幂等可断点续传"},
         ],
     },
     "rebuild_all": {

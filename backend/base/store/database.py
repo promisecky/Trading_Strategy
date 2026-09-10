@@ -164,10 +164,11 @@ def _migrate_add_value_tables(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS value_dividend (
             code          TEXT NOT NULL,
             fiscal_year   INTEGER NOT NULL,
+            seq           INTEGER NOT NULL DEFAULT 0,
             dps           REAL,
             announce_date TEXT,
             ex_date       TEXT,
-            PRIMARY KEY (code, fiscal_year)
+            PRIMARY KEY (code, fiscal_year, seq)
         );
         CREATE TABLE IF NOT EXISTS value_roe (
             code          TEXT NOT NULL,
@@ -183,12 +184,16 @@ def _migrate_add_value_tables(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (code, date)
         );
         CREATE TABLE IF NOT EXISTS value_kline (
-            code  TEXT NOT NULL,
-            date  TEXT NOT NULL,
-            open  REAL,
-            close REAL,
-            high  REAL,
-            low   REAL,
+            code   TEXT NOT NULL,
+            date   TEXT NOT NULL,
+            open   REAL,
+            close  REAL,
+            high   REAL,
+            low    REAL,
+            aopen  REAL,
+            aclose REAL,
+            ahigh  REAL,
+            alow   REAL,
             PRIMARY KEY (code, date)
         );
         CREATE TABLE IF NOT EXISTS value_pool (
@@ -200,9 +205,35 @@ def _migrate_add_value_tables(conn: sqlite3.Connection) -> None:
         """
     )
     # 存量表补列(新建库上方 CREATE 已含; ALTER 重复执行报重复列则忽略)
-    for col in ("high", "low"):
+    for col in ("high", "low", "aopen", "aclose", "ahigh", "alow"):
         try:
             conn.execute(f"ALTER TABLE value_kline ADD COLUMN {col} REAL")
         except sqlite3.OperationalError:
             pass
+    # value_dividend 口径升级: 每笔分红独立存行(同财年中期+年报多笔), 主键加 seq;
+    # 存量行 seq=0 平移, 同时归一历史 "NaT" 脏字符串为 ""(重拉前的过渡态)
+    div_cols = {row[1] for row in conn.execute("PRAGMA table_info(value_dividend)")}
+    if "seq" not in div_cols:
+        conn.executescript(
+            """
+            CREATE TABLE value_dividend_new (
+                code          TEXT NOT NULL,
+                fiscal_year   INTEGER NOT NULL,
+                seq           INTEGER NOT NULL DEFAULT 0,
+                dps           REAL,
+                announce_date TEXT,
+                ex_date       TEXT,
+                PRIMARY KEY (code, fiscal_year, seq)
+            );
+            INSERT INTO value_dividend_new(code, fiscal_year, seq, dps, announce_date, ex_date)
+                SELECT code, fiscal_year, 0, dps,
+                       CASE WHEN announce_date = 'NaT' THEN '' ELSE announce_date END,
+                       CASE WHEN ex_date = 'NaT' THEN '' ELSE ex_date END
+                FROM value_dividend;
+            DROP TABLE value_dividend;
+            ALTER TABLE value_dividend_new RENAME TO value_dividend;
+            """
+        )
+    conn.execute("UPDATE value_dividend SET announce_date='' WHERE announce_date='NaT'")
+    conn.execute("UPDATE value_dividend SET ex_date='' WHERE ex_date='NaT'")
     conn.commit()

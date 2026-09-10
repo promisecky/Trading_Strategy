@@ -101,6 +101,13 @@ def test_gate_mcap_boundary():
     assert not _gate(base_snapshot(mcap_yi=299.99), "大盘股")["passed"]
 
 
+def test_gates_fail_closed_on_negative_price():
+    """对抗性: 负价/零价注入时股息率与市值门必须拒绝(fail-closed), 不得因比值符号翻转而误放行。"""
+    assert not _gate(base_snapshot(price=-5.0), "股息托底")["passed"]
+    assert not _gate(base_snapshot(price=0.0), "股息托底")["passed"]
+    assert not _gate(base_snapshot(mcap_yi=-1000.0), "大盘股")["passed"]
+
+
 def test_gate_real_estate_excluded():
     assert not _gate(base_snapshot(industry="房地产开发"), "非地产")["passed"]
     assert not _gate(base_snapshot(industry="房地产服务"), "非地产")["passed"]
@@ -148,6 +155,32 @@ def test_z_warmup_and_hand_computed():
     assert z_series([1.0] * 250)[249] is None
 
 
+def test_bias_series_rejects_nonpositive_prices():
+    """对抗性(A1 根因): 负价/零价/NaN 视同缺失 — 污染窗口及其后 120 日整段不出值,
+    根治旧版"只挡 ma==0"导致负价段 bias 算出 -100~+2400 的缺陷。"""
+    closes = [10.0] * 130 + [-2.5] * 10 + [10.0] * 200
+    b = bias_series(closes)
+    assert b[129] is not None and abs(b[129] - 1.0) < 1e-9  # 污染前正常
+    assert all(x is None for x in b[130:140])  # 负价段无值
+    assert all(x is None for x in b[140:259])  # 负价滑出 MA120 窗口前(140+119)持续无值
+    assert b[259] is not None and abs(b[259] - 1.0) < 1e-9  # 窗口洗净后恢复
+    assert all(x is None for x in bias_series([0.0] * 200))  # 全零价 → 全 None
+    nan_b = bias_series([float("nan")] * 130 + [10.0] * 130)  # NaN 不崩且视同缺失
+    assert all(x is None for x in nan_b[:249]) and nan_b[259] is not None
+
+
+def test_activity_series_rejects_dirty_ranges():
+    """对抗性: 负幅度/NaN/inf(脏高低价)视同缺失, 不污染中位数窗口。"""
+    r = [0.02] * 100
+    dirty = list(r)
+    dirty[50] = -3.0
+    dirty[51] = float("nan")
+    dirty[52] = float("inf")
+    a = activity_series(dirty)
+    assert a[99] is not None and abs(a[99] - 1.0) < 0.35  # 脏值被排除, 水位仍近 1(近5日均含脏值剔除后的均值)
+    assert all(x is None for x in activity_series([-1.0] * 100))  # 全脏 → 全 None
+
+
 # ---------------------------------------------------------------- 卖出优先级
 
 
@@ -184,9 +217,19 @@ def test_dynamic_stop_quiet_vs_heavy():
 
 def test_trailing_cap30():
     pos = {"X": {"cost": 10.0}}
-    sell_signals(pos, {"X": _q("X", 11.0)})  # 激活
+    sell_signals(pos, {"X": _q("X", 11.0)})  # 恰好 +10% → 激活(v3.1 激活线 1.10 边界)
+    assert pos["X"]["armed"]
     sig = sell_signals(pos, {"X": _q("X", 13.0)})  # +30% 封顶
     assert sig[0]["rule"] == 2
+
+
+def test_trailing_arm_boundary_below():
+    """对抗性: +9.9% 差一分不激活(v3.1 激活线 1.10), 不产生任何止盈状态与信号。"""
+    pos = {"Y": {"cost": 10.0}}
+    assert sell_signals(pos, {"Y": _q("Y", 10.99)}) == []
+    assert not pos["Y"].get("armed")
+    # 未激活时即使从高点回落也不触发②(无 max_close 追踪)
+    assert sell_signals(pos, {"Y": _q("Y", 10.2)}) == []
 
 
 def test_activity_series_trailing_only():

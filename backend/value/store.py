@@ -32,12 +32,13 @@ def get_stock_info(code: str) -> dict | None:
 
 
 def replace_dividends(code: str, rows: list[dict]) -> None:
+    """每笔分红独立存行(同财年中期+年报多笔), seq 按入参顺序编号。"""
     conn = get_connection()
     try:
         conn.execute("DELETE FROM value_dividend WHERE code=?", (code,))
         conn.executemany(
-            "INSERT OR REPLACE INTO value_dividend(code, fiscal_year, dps, announce_date, ex_date) VALUES(?,?,?,?,?)",
-            [(code, r["fiscal_year"], r["dps"], r["announce_date"], r["ex_date"]) for r in rows],
+            "INSERT OR REPLACE INTO value_dividend(code, fiscal_year, seq, dps, announce_date, ex_date) VALUES(?,?,?,?,?,?)",
+            [(code, r["fiscal_year"], i, r["dps"], r["announce_date"], r["ex_date"]) for i, r in enumerate(rows)],
         )
         conn.commit()
     finally:
@@ -70,28 +71,47 @@ def replace_pe(code: str, rows: list[tuple[str, float]]) -> None:
         conn.close()
 
 
-def replace_kline(code: str, rows: list[tuple[str, float, float, float, float]]) -> None:
-    """rows: (date, open, close, high, low)。"""
+def _valid_kline_row(row: tuple) -> bool:
+    """入库守卫: 日期格式 + 八价齐全且为正 + 高≥低(RAW/HFQ 各自)。脏行拒收不落库。"""
+    if len(row) != 9:
+        return False
+    d, o, c, h, l, ao, ac, ah, al = row
+    if not (isinstance(d, str) and len(d) == 10 and d[4] == "-" and d[7] == "-"):
+        return False
+    for v in (o, c, h, l, ao, ac, ah, al):
+        if not isinstance(v, (int, float)) or not v > 0:
+            return False
+    return h >= l and ah >= al
+
+
+def replace_kline(code: str, rows: list[tuple]) -> int:
+    """rows: (date, open, close, high, low, aopen, aclose, ahigh, alow) — RAW+HFQ 双价。
+    返回实际写入行数(脏行拒收)。"""
+    clean = [r for r in rows if _valid_kline_row(r)]
     conn = get_connection()
     try:
         conn.execute("DELETE FROM value_kline WHERE code=?", (code,))
         conn.executemany(
-            "INSERT OR REPLACE INTO value_kline(code, date, open, close, high, low) VALUES(?,?,?,?,?,?)",
-            [(code, d, o, c, h, l) for d, o, c, h, l in rows],
+            "INSERT OR REPLACE INTO value_kline(code, date, open, close, high, low, aopen, aclose, ahigh, alow) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            [(code, *r) for r in clean],
         )
         conn.commit()
     finally:
         conn.close()
+    return len(clean)
 
 
 def get_kline(code: str) -> dict[str, dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT date, open, close, high, low FROM value_kline WHERE code=? ORDER BY date", (code,)
+            "SELECT date, open, close, high, low, aopen, aclose, ahigh, alow FROM value_kline WHERE code=? ORDER BY date", (code,)
         ).fetchall()
         return {
-            r["date"]: {"open": r["open"], "close": r["close"], "high": r["high"], "low": r["low"]}
+            r["date"]: {
+                "open": r["open"], "close": r["close"], "high": r["high"], "low": r["low"],
+                "aopen": r["aopen"], "aclose": r["aclose"], "ahigh": r["ahigh"], "alow": r["alow"],
+            }
             for r in rows
         }
     finally:
@@ -137,6 +157,34 @@ def codes_missing_hl() -> list[str]:
         conn.close()
 
 
+def codes_missing_adj() -> list[str]:
+    """任一行缺 HFQ 价的个股(RAW+HFQ 双价迁移待办清单, 断点续传基准)。"""
+    conn = get_connection()
+    try:
+        return [
+            r["code"]
+            for r in conn.execute(
+                """SELECT code FROM value_kline
+                   WHERE aopen IS NULL OR aclose IS NULL OR ahigh IS NULL OR alow IS NULL
+                   GROUP BY code ORDER BY code"""
+            )
+        ]
+    finally:
+        conn.close()
+
+
+def last_price_row(code: str) -> tuple | None:
+    """最新一行的 (date, close, aclose): 日更追加前的复权比连续性守卫基准。"""
+    conn = get_connection()
+    try:
+        r = conn.execute(
+            "SELECT date, close, aclose FROM value_kline WHERE code=? ORDER BY date DESC LIMIT 1", (code,)
+        ).fetchone()
+        return (r["date"], r["close"], r["aclose"]) if r else None
+    finally:
+        conn.close()
+
+
 def latest_kline_dates() -> dict[str, str]:
     """每只股票的最新K线日(增量抓取的落后判定基准)。"""
     conn = get_connection()
@@ -148,17 +196,19 @@ def latest_kline_dates() -> dict[str, str]:
         conn.close()
 
 
-def upsert_kline(code: str, rows: list[tuple[str, float, float, float, float]]) -> None:
-    """增量写入K线(已存在日期覆盖, 新日期追加)。"""
+def upsert_kline(code: str, rows: list[tuple]) -> int:
+    """增量写入K线(已存在日期覆盖, 新日期追加); 脏行拒收, 返回写入行数。"""
+    clean = [r for r in rows if _valid_kline_row(r)]
     conn = get_connection()
     try:
         conn.executemany(
-            "INSERT OR REPLACE INTO value_kline(code, date, open, close, high, low) VALUES(?,?,?,?,?,?)",
-            [(code, d, o, c, h, l) for d, o, c, h, l in rows],
+            "INSERT OR REPLACE INTO value_kline(code, date, open, close, high, low, aopen, aclose, ahigh, alow) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            [(code, *r) for r in clean],
         )
         conn.commit()
     finally:
         conn.close()
+    return len(clean)
 
 
 def pe_max_date(code: str) -> str | None:

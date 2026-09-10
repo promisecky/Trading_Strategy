@@ -35,6 +35,7 @@ def test_quarterly_rebuild_skips_non_first_trading_day(monkeypatch):
 
 def test_freshness_guard_fresh_skips(monkeypatch):
     monkeypatch.setattr(vf.store, "latest_kline_dates", lambda: {"600000": "2026-09-01"})
+    monkeypatch.setattr(vf.store, "codes_missing_adj", lambda: [])
     monkeypatch.setattr(vf, "_existing_codes", lambda: ["600000"])
     monkeypatch.setattr("base.store.calendar_repo.get_trade_days", lambda end=None: ["2026-09-01"])
     out = vf.task_value_freshness_guard()
@@ -43,6 +44,7 @@ def test_freshness_guard_fresh_skips(monkeypatch):
 
 def test_freshness_guard_stale_catches_up(monkeypatch):
     monkeypatch.setattr(vf.store, "latest_kline_dates", lambda: {"600000": "2026-08-28"})
+    monkeypatch.setattr(vf.store, "codes_missing_adj", lambda: [])
     monkeypatch.setattr(vf, "_existing_codes", lambda: ["600000"])
     monkeypatch.setattr(
         "base.store.calendar_repo.get_trade_days", lambda end=None: ["2026-08-28", "2026-08-31"]
@@ -58,6 +60,29 @@ def test_freshness_guard_stale_catches_up(monkeypatch):
     assert out["fresh"] is False and called
 
 
+def test_freshness_guard_prioritizes_dual_price_migration(monkeypatch):
+    """存在未双价迁移个股时: 即使日期新鲜也不走普通追更(防止旧口径叠加新行),
+    而是同步启动迁移任务并接入 job_manager; 迁移运行中则静默跳过。"""
+    from base.scheduler.job_manager import job_manager
+
+    monkeypatch.setattr(vf.store, "latest_kline_dates", lambda: {"600000": "2026-09-01"})
+    monkeypatch.setattr(vf.store, "codes_missing_adj", lambda: ["600000", "601088"])
+    ran = {}
+    import base.scheduler.job_registry as jr
+
+    monkeypatch.setitem(jr.JOB_FNS, "value_upgrade_kline", lambda p: ran.setdefault("x", 1) and {"todo": 2, "upgraded": 2, "failed": 0} or {"todo": 2, "upgraded": 2, "failed": 0})
+    out = vf.task_value_freshness_guard()
+    assert out["fresh"] is False and out["migrating"] == 2 and ran
+    st = job_manager.get(out["job_id"])
+    assert st is not None and st.status == "success"
+    # 迁移运行中(占位 active job) → 重入被拦
+    jid = job_manager.submit("value_upgrade_kline", {}, True)
+    job_manager.mark_running(jid)
+    out2 = vf.task_value_freshness_guard()
+    assert out2["job_id"] is None and out2["migrating"] == 2
+    job_manager.finish(jid, {"todo": 0}, None)
+
+
 def test_quarterly_rebuild_runs_on_first_trading_day(monkeypatch):
     monkeypatch.setattr(vf.store, "latest_kline_dates", lambda: {"600000": "2026-07-01"})
     monkeypatch.setattr("base.store.calendar_repo.get_trade_days", lambda s, e: ["2026-07-01"])
@@ -70,7 +95,7 @@ def test_quarterly_rebuild_runs_on_first_trading_day(monkeypatch):
 
 
 def test_single_stock_full_position_round_trip():
-    """slot_divisor=1: 单票独立视角全仓买入, 移动止盈回落卖 +11.1% 往返全部落袋。"""
+    """slot_divisor=1: 单票独立视角全仓买入, 移动止盈回落卖往返全部落袋(含成本扣减)。"""
     closes = dip_closes()
     closes[150] = 1.05  # 激活
     closes[151] = 1.00  # 回落卖
@@ -82,6 +107,7 @@ def test_single_stock_full_position_round_trip():
     buys = [t for t in res["trade_log"] if t["action"] == "BUY"]
     sells = [t for t in res["trade_log"] if t["action"] == "SELL"]
     assert len(buys) == 1 and len(sells) == 1
-    assert abs(buys[0]["amount"] - 1.0) < 1e-6  # 全仓 = 全部权益
+    assert abs(buys[0]["amount"] - 1.0) < 1e-6  # 全仓 = 全部权益(现金支出口径)
     assert sells[0]["name"] == "A"  # 交易记录带名称
-    assert abs(res["metrics"]["total_return_pct"] - 11.11) < 0.15  # 1.0/0.9-1
+    # 精确: 1.00/0.90 × (1-佣金2.5bp) × (1-佣金-印花税10bp, 2018) - 1 ≈ 10.94%
+    assert abs(res["metrics"]["total_return_pct"] - 10.94) < 0.02

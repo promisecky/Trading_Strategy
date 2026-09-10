@@ -52,18 +52,23 @@ from value.config import (
 
 def activity_series(ranges: list[float | None]) -> list[float | None]:
     """幅度水位 = 近5日均(高-低)/收 ÷ 近60日中位数(成交量代理, 纯 trailing 无前视)。
-    <1 缩幅(洗盘特征), >1.5 放幅(出货/恐慌未竭)。"""
+    <1 缩幅(洗盘特征), >1.5 放幅(出货/恐慌未竭)。
+    对抗性: 非有限/负值幅度(脏数据)视同缺失, 不参与窗口与均值。"""
     n = len(ranges)
     out: list[float | None] = [None] * n
     win: list[float] = []
     for i, r in enumerate(ranges):
+        if r is not None and not (math.isfinite(r) and r >= 0):
+            r = None
         if i >= 60 and ranges[i - 60] is not None:
-            win.pop(bisect_left(win, ranges[i - 60]))
+            old = ranges[i - 60]
+            if old is not None and math.isfinite(old) and old >= 0:
+                win.pop(bisect_left(win, old))
         if r is not None:
             insort(win, r)
         if r is None or len(win) < 30:
             continue
-        recent = [x for x in ranges[max(0, i - 4) : i + 1] if x is not None]
+        recent = [x for x in ranges[max(0, i - 4) : i + 1] if x is not None and math.isfinite(x) and x >= 0]
         med = win[len(win) // 2]
         if recent and med > 0:
             out[i] = (sum(recent) / len(recent)) / med
@@ -85,21 +90,27 @@ def dynamic_stop(act: float | None) -> float:
 
 def bias_series(closes: list[float | None]) -> list[float | None]:
     """bias = 收盘 ÷ MA120; 不足 MA_WINDOW 点或窗口含缺失值返回 None(暖机期/停牌)。
-    滑动和实现, O(n)。"""
+    滑动和实现, O(n)。
+    对抗性守卫: 非正/非有限价格视同缺失(污染窗口整段不出值),
+    且仅当 ma > 0 才出值 — 根治旧版"只挡 ma==0"导致负价段 bias 算出 -100~+2400 的缺陷。"""
     n = len(closes)
     out: list[float | None] = [None] * n
     if n < MA_WINDOW:
         return out
+
+    def _ok(v) -> bool:
+        return v is not None and math.isfinite(v) and v > 0
+
     window_sum = 0.0
     missing = 0
     for i in range(n):
-        v = closes[i]
+        v = closes[i] if _ok(closes[i]) else None
         if v is None:
             missing += 1
         else:
             window_sum += v
         if i >= MA_WINDOW:
-            old = closes[i - MA_WINDOW]
+            old = closes[i - MA_WINDOW] if _ok(closes[i - MA_WINDOW]) else None
             if old is None:
                 missing -= 1
             else:
@@ -108,12 +119,13 @@ def bias_series(closes: list[float | None]) -> list[float | None]:
             if missing > 0 or v is None:
                 continue
             ma = window_sum / MA_WINDOW
-            out[i] = v / ma if ma else None
+            out[i] = v / ma if ma > 0 else None
     return out
 
 
 def z_series(bias: list[float | None]) -> list[float | None]:
-    """z = (bias − bias 的 250 日均值) ÷ 250 日标准差; 窗口需满 250 个非 None。滑动和实现, O(n)。"""
+    """z = (bias − bias 的 250 日均值) ÷ 250 日标准差; 窗口需满 250 个有效值。
+    滑动和实现, O(n)。对抗性: 非有限 bias 视同缺失(窗口不满则整段不出值)。"""
     n = len(bias)
     out: list[float | None] = [None] * n
     if n < Z_WINDOW:
@@ -122,14 +134,14 @@ def z_series(bias: list[float | None]) -> list[float | None]:
     wsum2 = 0.0
     missing = 0
     for i in range(n):
-        v = bias[i]
+        v = bias[i] if bias[i] is not None and math.isfinite(bias[i]) else None
         if v is None:
             missing += 1
         else:
             wsum += v
             wsum2 += v * v
         if i >= Z_WINDOW:
-            old = bias[i - Z_WINDOW]
+            old = bias[i - Z_WINDOW] if bias[i - Z_WINDOW] is not None and math.isfinite(bias[i - Z_WINDOW]) else None
             if old is None:
                 missing -= 1
             else:
@@ -188,7 +200,7 @@ def check_gates(snap: dict, as_of: str) -> list[dict]:
         {"gate": "盈利且不贵", "passed": passed, "reason": f"PE(TTM)={pe if pe is not None else '缺'}需在(0,{PE_MAX}]"}
     )
 
-    # 3 股息托底: 近 365 天除权分红总额 ÷ 当前价 > 3%
+    # 3 股息托底: 近 365 天除权分红总额 ÷ 当前价 > 3% (价格必须用不复权 RAW 口径, 调用方注入)
     price = snap.get("price") or 0
     cutoff = (datetime.strptime(as_of, "%Y-%m-%d") - timedelta(days=DY_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
     dy_sum = sum(
@@ -196,7 +208,7 @@ def check_gates(snap: dict, as_of: str) -> list[dict]:
         for d in snap.get("dividends", [])
         if d.get("ex_date") and cutoff < d["ex_date"] <= as_of and (d.get("dps") or 0) > 0
     )
-    dy = (dy_sum / price * 100) if price > 0 else 0.0
+    dy = (dy_sum / price * 100) if price > 0 else 0.0  # 非正价格 fail-closed → 0 → 拒
     passed = dy > DY_MIN_PCT
     gates.append({"gate": "股息托底", "passed": passed, "reason": f"滚动一年股息率 {dy:.2f}% 需 > {DY_MIN_PCT}%"})
 
