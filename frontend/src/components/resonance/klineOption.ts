@@ -4,6 +4,8 @@ import type { KlinePoint, ResonanceHistoryPoint, DailySignal, TradePoint, Regime
 import { buildTradeBands, sanitizeBands } from '../kline/tradeBands'
 import { buildKlineTooltip } from '../kline/klineTooltip'
 import { buildMarks } from '../kline/klineMarks'
+import { buildMacdPanel } from './macdOption'
+import { buildEmaOverlay } from './emaOverlay'
 import type { RangeSelection } from '../kline/rangeSelect'
 import type { RangeStats } from '../kline/rangeStats'
 
@@ -12,6 +14,7 @@ const DANGER_BAND = 'rgba(239, 68, 68, 0.08)'
 const CHANCE_BAND = 'rgba(34, 197, 94, 0.08)'
 const UP_COLOR = '#ef4444'
 const DOWN_COLOR = '#22c55e'
+const SHARE_ADJUST_COLOR = '#a78bfa' // 份额折算/合并日(非申赎)
 
 interface BuildParams {
   kline: KlinePoint[]
@@ -77,10 +80,18 @@ export function buildKlineOption({ kline, history, signals, trades, regimes, sel
   const ohlc = kline.map(k => [k.open, k.close, k.low, k.high])
   const volumes = kline.map(k => k.volume)
 
+  // 标准 MACD 三件套 (DIF 12/26 + DEA + 红绿柱), 独立面板在综合概率下方
+  const macdPanel = buildMacdPanel(kline, dates)
+  // 主图叠加长周期价格均线 EMA120/EMA350(价格量纲, 共享价格轴 → 缩放不跳)
+  const emaOverlay = buildEmaOverlay(kline)
+
   const sigByDate = new Map<string, DailySignal>()
   for (const s of signals) sigByDate.set(s.date, s)
   const flowData = dates.map(d => {
-    const v = sigByDate.get(d)?.shares_delta_yi
+    const sig = sigByDate.get(d)
+    const v = sig?.shares_delta_yi
+    // 折算/合并日: 份额数量的机械变动(非资金申赎), 用紫色区分, 避免被读成天量申购
+    if (sig?.share_adjust != null) return { value: v ?? 0, itemStyle: { color: SHARE_ADJUST_COLOR } }
     if (v == null) return { value: null, itemStyle: { color: '#374151' } }
     return { value: v, itemStyle: { color: v >= 0 ? DOWN_COLOR : UP_COLOR } }
   })
@@ -109,8 +120,8 @@ export function buildKlineOption({ kline, history, signals, trades, regimes, sel
   // 移动端: 不使用 brush(触摸不支持), 改用两次点击选区间
   const brushActive = rangeSel.mode && !isMobile
   const insideZoom = brushActive
-    ? { type: 'inside' as const, xAxisIndex: [0, 1, 2, 3], moveOnMouseMove: false }
-    : { type: 'inside' as const, xAxisIndex: [0, 1, 2, 3], moveOnMouseMove: true, preventDefaultMouseMove: true }
+    ? { type: 'inside' as const, xAxisIndex: [0, 1, 2, 3, 4], moveOnMouseMove: false }
+    : { type: 'inside' as const, xAxisIndex: [0, 1, 2, 3, 4], moveOnMouseMove: true, preventDefaultMouseMove: true }
 
   const { markPoint, markLine, markLineTop, probMarkLine } =
     buildMarks(trades, kline, dates, selectedDate)
@@ -163,22 +174,25 @@ export function buildKlineOption({ kline, history, signals, trades, regimes, sel
         },
       ],
       grid: [
-        { left: 60, right: 20, top: 20, height: '38%' },
-        { left: 60, right: 20, top: '59%', height: '6%' },
-        { left: 60, right: 20, top: '66%', height: '6%' },
-        { left: 60, right: 20, top: '73%', height: '11%' },
+        { left: 60, right: 20, top: 20, height: '34%' },
+        { left: 60, right: 20, top: '56%', height: '4.5%' },
+        { left: 60, right: 20, top: '61.5%', height: '4.5%' },
+        { left: 60, right: 20, top: '67%', height: '8%' },
+        macdPanel.grid,
       ],
       xAxis: [
         { type: 'category', data: dates, gridIndex: 0, boundaryGap: true, axisLabel: { color: AXIS_LABEL, fontSize: 10 } },
         { type: 'category', data: dates, gridIndex: 1, boundaryGap: true, axisLabel: { show: false } },
         { type: 'category', data: dates, gridIndex: 2, boundaryGap: true, axisLabel: { show: false } },
         { type: 'category', data: dates, gridIndex: 3, boundaryGap: false, axisLabel: { show: false } },
+        macdPanel.xAxis,
       ],
       yAxis: [
         { scale: true, gridIndex: 0, boundaryGap: ['3%', '3%'], splitLine: { lineStyle: { color: '#1f2937' } }, axisLabel: { color: AXIS_LABEL } },
         { scale: true, gridIndex: 1, splitLine: { show: false }, axisLabel: { show: false } },
         { scale: true, gridIndex: 2, splitLine: { show: false }, axisLabel: { color: AXIS_LABEL, fontSize: 9 } },
         { min: 0, max: 100, gridIndex: 3, splitNumber: 2, splitLine: { show: false }, axisLabel: { color: AXIS_LABEL, fontSize: 9, formatter: '{value}%' } },
+        macdPanel.yAxis,
       ],
       series: [
         {
@@ -239,12 +253,14 @@ export function buildKlineOption({ kline, history, signals, trades, regimes, sel
           areaStyle: { opacity: 0.08 },
           markLine: probMarkLine,
         },
+        ...macdPanel.series,
+        ...emaOverlay.series,
       ],
       dataZoom: [
         insideZoom,
         {
           type: 'slider',
-          xAxisIndex: [0, 1, 2, 3],
+          xAxisIndex: [0, 1, 2, 3, 4],
           top: '92%',
           height: 16,
           borderColor: '#374151',
