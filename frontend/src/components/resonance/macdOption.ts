@@ -18,7 +18,6 @@ export const DIF_COLOR = '#22d3ee' // DIF(12,26) 青色
 export const DEA_COLOR = '#fbbf24' // 信号线 DEA(9) 黄色
 const HIST_UP = '#ef4444' // 红柱: DIF > DEA (多头)
 const HIST_DOWN = '#22c55e' // 绿柱: DIF < DEA (空头)
-const AXIS_LABEL = '#6b7280'
 
 function ema(vals: number[], span: number): number[] {
   const k = 2 / (span + 1)
@@ -62,14 +61,21 @@ export function buildMacdPanel(kline: KlinePoint[], dates: string[]) {
   }))
 
   return {
-    grid: { left: 60, right: 20, top: '74%', height: '11%' },
-    xAxis: { type: 'category' as const, data: dates, gridIndex: 4, boundaryGap: true, axisLabel: { show: false } },
+    grid: { left: 60, right: 20, top: '70%', height: '8%' },
+    xAxis: {
+      type: 'category' as const,
+      data: dates,
+      gridIndex: 4,
+      boundaryGap: true,
+      axisLabel: { show: false },
+      axisPointer: { label: { show: false } },
+    },
     yAxis: {
       scale: true,
       gridIndex: 4,
       splitNumber: 3,
       splitLine: { show: false },
-      axisLabel: { color: AXIS_LABEL, fontSize: 9 },
+      axisLabel: { show: false },
     },
     series: [
       {
