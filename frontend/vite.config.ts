@@ -21,4 +21,18 @@ export default defineConfig({
       },
     },
   },
+  // 生产预览: 服务 dist 构建产物(打包后首屏请求数从数百降到3)。
+  // 端口/host/代理与 dev 一致, systemd 由 `vite dev` 切到 `vite preview` 后,
+  // SSH 隧道/CF/新加坡反代/前端调用均无需改动。
+  preview: {
+    port: 5174,
+    host: '0.0.0.0',
+    allowedHosts: ['.opensesame.cc', 'localhost', '127.0.0.1'],
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+      },
+    },
+  },
 })

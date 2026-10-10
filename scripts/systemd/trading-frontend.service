@@ -1,11 +1,15 @@
 [Unit]
-Description=TradingSystem Frontend (vite dev :5174)
+Description=TradingSystem Frontend (vite preview :5174, 生产构建)
 After=network-online.target trading-backend.service
 Wants=network-online.target
 
 [Service]
 WorkingDirectory=/root/workspace/TradingSystem/frontend
-ExecStart=/usr/bin/npm run dev -- --host 0.0.0.0
+# 先构建 dist 再起 preview(端口5174不变, SSH隧道/CF/新加坡反代无需改动);
+# build 约60s, 放宽启动超时。改前端代码后 restart 本服务即自动重建。
+ExecStartPre=/usr/bin/npm run build
+ExecStart=/usr/bin/npm run preview
+TimeoutStartSec=240
 Restart=always
 RestartSec=3
 StandardOutput=append:/root/workspace/TradingSystem/logs/frontend.log

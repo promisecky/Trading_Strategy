@@ -287,6 +287,13 @@ def _migrate_add_value_tables(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE value_kline ADD COLUMN {col} REAL")
         except sqlite3.OperationalError:
             pass
+    # 部分索引: 仅索引"缺 HFQ 复权价"的行。双价迁移完成后该集合恒为空(实测0/123万),
+    # 使 codes_missing_adj() 由全表扫 123万行(~11s)降为走空索引(~0s);
+    # 新股入池若有未迁移行会落入本索引, 正确性不变。须在补列后建(依赖 aopen 等列)。
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_vk_missing_adj ON value_kline(code) "
+        "WHERE aopen IS NULL OR aclose IS NULL OR ahigh IS NULL OR alow IS NULL"
+    )
     # value_dividend 口径升级: 每笔分红独立存行(同财年中期+年报多笔), 主键加 seq;
     # 存量行 seq=0 平移, 同时归一历史 "NaT" 脏字符串为 ""(重拉前的过渡态)
     div_cols = {row[1] for row in conn.execute("PRAGMA table_info(value_dividend)")}
