@@ -11,6 +11,14 @@ def get_connection() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
+    # 性能调优(本机内存仅 1.6G, 长期 swap, 大库扫描易抖动):
+    # - synchronous=NORMAL: WAL 下安全(断电最多丢最后未 checkpoint 的事务, 不损坏库),
+    #   省去每次 commit 的 fsync, 明显加速批量写入/定时任务。
+    # - mmap_size=128M: 只读页走文件映射, 与 OS 页缓存共享; 内存紧张时 clean 页
+    #   可直接回收而不进 swap(比增大匿名 cache_size 更省内存)。实测大库
+    #   单股K线查询 38ms→3ms。取 128M(库约253M)适中, 避免过度映射。
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA mmap_size=134217728")
     return conn
 
 
