@@ -33,6 +33,7 @@ _COMPUTING: dict = {"lock": threading.Lock(), "cond": None}  # single-flight: �
 _INPUTS_LOCK = threading.Lock()  # 冷启动只加载一次, 避免并发各自重读 200MB 库
 STATE_FILE = DB_PATH.parent / "value_state.json"  # 回测状态落盘: 重启后磁盘预热秒开
 INPUTS_FILE = DB_PATH.parent / "value_inputs.pkl"  # 底层数据集落盘: 避免每次重启重读 200MB 库(~40s)
+_INPUTS_FMT = 2  # inputs.pkl 结构版本: 2=KlineView 紧凑存储(旧 dict 版视为1); 不匹配则丢弃重建
 
 
 def _inputs() -> dict:
@@ -56,7 +57,7 @@ def _inputs_from_db() -> dict:
     # 双价口径门禁: 未完成 RAW+HFQ 迁移的个股不入回测宇宙(宁可缺样本, 不用污染口径)
     missing_adj = set(store.codes_missing_adj())
     codes = sorted(c for c in counts if counts[c] > 0 and c not in missing_adj)
-    kline = {c: store.get_kline(c) for c in codes}
+    kline = {c: store.get_kline_view(c) for c in codes}  # 紧凑视图(numpy底层), 常驻内存约省 5x
     dates = sorted({d for kl in kline.values() for d in kl})
     snapshots = {}
     pe = {}
@@ -74,7 +75,7 @@ def _inputs_from_db() -> dict:
 def _save_inputs_disk(data: dict) -> None:
     try:
         with open(INPUTS_FILE, "wb") as f:
-            pickle.dump({"fp": _fingerprint(), "data": data}, f, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump({"fp": _fingerprint(), "fmt": _INPUTS_FMT, "data": data}, f, protocol=pickle.HIGHEST_PROTOCOL)
     except Exception as e:
         print(f"[value] persist inputs failed: {type(e).__name__} {e}")
 
@@ -83,7 +84,7 @@ def _load_inputs_disk() -> dict | None:
     try:
         with open(INPUTS_FILE, "rb") as f:
             d = pickle.load(f)
-        return d["data"] if d.get("fp") == _fingerprint() else None
+        return d["data"] if d.get("fp") == _fingerprint() and d.get("fmt") == _INPUTS_FMT else None
     except Exception:
         return None
 

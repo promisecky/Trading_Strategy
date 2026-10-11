@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from base.store.database import get_connection
+from value.kline_view import KlineView
 
 
 def upsert_stock_info(code: str, name: str, industry: str, total_shares_yi: float | None) -> None:
@@ -114,6 +115,22 @@ def get_kline(code: str) -> dict[str, dict]:
             }
             for r in rows
         }
+    finally:
+        conn.close()
+
+
+def get_kline_view(code: str) -> KlineView:
+    """get_kline 的紧凑内存版(见 kline_view.KlineView): 行为等价于
+    {date: {8价格字段}}, 但常驻内存约省 5x(numpy 底层 + intern 日期)。
+    供 _inputs 常驻数据集使用, 回测/接口消费方无需感知差异。
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT date, open, close, high, low, aopen, aclose, ahigh, alow FROM value_kline WHERE code=? ORDER BY date",
+            (code,),
+        ).fetchall()
+        return KlineView.from_rows(rows)
     finally:
         conn.close()
 
