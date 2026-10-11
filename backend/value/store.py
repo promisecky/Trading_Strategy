@@ -6,6 +6,7 @@ import json
 
 from base.store.database import get_connection
 from value.kline_view import KlineView
+from value.pe_view import PeView
 
 
 def upsert_stock_info(code: str, name: str, industry: str, total_shares_yi: float | None) -> None:
@@ -140,6 +141,21 @@ def get_pe(code: str) -> dict[str, float]:
     try:
         rows = conn.execute("SELECT date, pe_ttm FROM value_pe WHERE code=?", (code,)).fetchall()
         return {r["date"]: r["pe_ttm"] for r in rows}
+    finally:
+        conn.close()
+
+
+def get_pe_view(code: str) -> PeView:
+    """get_pe 的紧凑内存版(见 pe_view.PeView): 行为等价于 {date: pe_ttm},
+    但常驻内存约省 7x(numpy 底层 + intern 日期)。显式 ORDER BY date 保证
+    升序(PeView 的 bisect 查找依赖)。供 _inputs 常驻数据集使用。
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT date, pe_ttm FROM value_pe WHERE code=? ORDER BY date", (code,)
+        ).fetchall()
+        return PeView.from_rows(rows)
     finally:
         conn.close()
 

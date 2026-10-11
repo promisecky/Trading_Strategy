@@ -33,7 +33,7 @@ _COMPUTING: dict = {"lock": threading.Lock(), "cond": None}  # single-flight: �
 _INPUTS_LOCK = threading.Lock()  # 冷启动只加载一次, 避免并发各自重读 200MB 库
 STATE_FILE = DB_PATH.parent / "value_state.json"  # 回测状态落盘: 重启后磁盘预热秒开
 INPUTS_FILE = DB_PATH.parent / "value_inputs.pkl"  # 底层数据集落盘: 避免每次重启重读 200MB 库(~40s)
-_INPUTS_FMT = 2  # inputs.pkl 结构版本: 2=KlineView 紧凑存储(旧 dict 版视为1); 不匹配则丢弃重建
+_INPUTS_FMT = 3  # inputs.pkl 结构版本: 3=kline+pe 均紧凑视图(2=仅kline, 1=全dict); 不匹配则丢弃重建
 
 
 def _inputs() -> dict:
@@ -65,7 +65,7 @@ def _inputs_from_db() -> dict:
         snap = store.get_snapshot(c)
         if snap:
             snapshots[c] = snap
-        pe[c] = store.get_pe(c)
+        pe[c] = store.get_pe_view(c)  # 紧凑视图(numpy底层), 常驻内存约省 7x
     return {
         "codes": codes, "kline": kline, "dates": dates, "snapshots": snapshots, "pe": pe,
         "migration_pending": len(missing_adj & {c for c in counts if counts[c] > 0}),
